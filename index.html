@@ -1,0 +1,2391 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+
+  <meta name="theme-color" content="#0f8f81" />
+  <meta name="application-name" content="AquaGest Pro" />
+  <meta
+    name="description"
+    content="AquaGest Pro — gestão técnica offline-first para Piscicultura, viveiros, produção, biometria, água, arraçoamento, estoque, financeiro e relatórios."
+  />
+
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta
+    name="apple-mobile-web-app-status-bar-style"
+    content="default"
+  />
+  <meta name="apple-mobile-web-app-title" content="AquaGest Pro" />
+
+  <title>AquaGest Pro</title>
+
+  <link rel="manifest" href="manifest.json" />
+
+  <link
+    rel="icon"
+    type="image/png"
+    sizes="192x192"
+    href="icon-192.png"
+  />
+
+  <link
+    rel="apple-touch-icon"
+    href="icon-192.png"
+  />
+
+  <link rel="stylesheet" href="estilo.css" />
+  
+  
+  
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("desktop") === "1") {
+        document.documentElement.classList.add("desktop-mode");
+      }
+    })();
+  </script>
+
+  <style>
+    /*
+      Proteção mínima de boot.
+
+      O controle principal continua sendo feito
+      pelos arquivos CSS do AquaGest Pro.
+    */
+
+    .hidden {
+      display: none !important;
+    }
+
+    .auth-panel {
+      display: block;
+    }
+
+    .auth-panel.hidden {
+      display: none !important;
+    }
+
+    .auth-panel.active {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <div
+    id="systemMessage"
+    class="system-message hidden"
+    aria-live="polite"
+    role="status"
+  ></div>
+
+  <!-- =====================================================
+       ÁREA PÚBLICA / AUTENTICAÇÃO
+  ====================================================== -->
+
+  <main id="publicArea" class="public-area">
+    <div class="auth-layout">
+      <section class="auth-card">
+        <div class="auth-brand">
+          <div class="brand-icon" aria-hidden="true">
+            <img src="icon-192.png" alt="" />
+          </div>
+
+          <div>
+            <h1>AquaGest Pro</h1>
+            <p>Gestão técnica offline-first para Piscicultura.</p>
+          </div>
+        </div>
+
+        <div
+          id="authMessage"
+          class="system-message hidden"
+          aria-live="polite"
+          role="status"
+        ></div>
+
+        <!-- Login -->
+
+        <section
+          id="loginPanel"
+          class="auth-panel active"
+          aria-labelledby="loginPanelTitle"
+        >
+          <h2 id="loginPanelTitle">Acessar sistema</h2>
+
+          <p>
+            Entre com seu e-mail e senha para continuar.
+          </p>
+
+          <form
+            id="loginForm"
+            class="form"
+            autocomplete="off"
+          >
+            <label for="loginEmail">E-mail</label>
+
+            <input
+              id="loginEmail"
+              name="email"
+              type="text"
+              autocomplete="off"
+              inputmode="email"
+              autocapitalize="none"
+              spellcheck="false"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              required
+            />
+
+            <label for="loginPassword">Senha</label>
+
+            <input
+              id="loginPassword"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+
+            <button
+              class="primary-btn"
+              type="submit"
+            >
+              Entrar
+            </button>
+          </form>
+
+          <div class="auth-actions">
+            <button
+              id="showCreateAccountBtn"
+              class="link-btn"
+              type="button"
+            >
+              Criar conta
+            </button>
+
+            <button
+              id="showRecoveryBtn"
+              class="link-btn"
+              type="button"
+            >
+              Recuperar senha
+            </button>
+          </div>
+        </section>
+
+        <!-- Criar conta -->
+
+        <section
+          id="createAccountPanel"
+          class="auth-panel hidden"
+          aria-labelledby="createAccountPanelTitle"
+        >
+          <h2 id="createAccountPanelTitle">Criar conta</h2>
+
+          <p>
+            Cadastre o proprietário responsável pela Piscicultura.
+          </p>
+
+          <form
+            id="createAccountForm"
+            class="form"
+            autocomplete="on"
+          >
+            <label for="createName">
+              Nome do proprietário
+            </label>
+
+            <input
+              id="createName"
+              name="name"
+              type="text"
+              autocomplete="name"
+              required
+            />
+
+            <label for="createEmail">
+              E-mail
+            </label>
+
+            <input
+              id="createEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              inputmode="email"
+              required
+            />
+
+            <label for="createPassword">
+              Senha
+            </label>
+
+            <input
+              id="createPassword"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+
+            <label for="createConfirmPassword">
+              Confirmar senha
+            </label>
+
+            <input
+              id="createConfirmPassword"
+              name="confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+
+            <label for="createSecurityQuestion">
+              Pergunta de segurança
+            </label>
+
+            <input
+              id="createSecurityQuestion"
+              name="securityQuestion"
+              type="text"
+              required
+            />
+
+            <label for="createSecurityAnswer">
+              Resposta de segurança
+            </label>
+
+            <input
+              id="createSecurityAnswer"
+              name="securityAnswer"
+              type="text"
+              autocomplete="off"
+              required
+            />
+
+            <button
+              class="primary-btn"
+              type="submit"
+            >
+              Criar conta
+            </button>
+          </form>
+
+          <div class="auth-actions">
+            <button
+              id="backToLoginFromCreateBtn"
+              class="link-btn"
+              type="button"
+            >
+              Voltar para login
+            </button>
+          </div>
+        </section>
+
+        <!-- Recuperação -->
+
+        <section
+          id="recoveryPanel"
+          class="auth-panel hidden"
+          aria-labelledby="recoveryPanelTitle"
+        >
+          <h2 id="recoveryPanelTitle">
+            Recuperar senha
+          </h2>
+
+          <p>
+            Informe o e-mail cadastrado ou o nome do proprietário
+            para carregar a pergunta de segurança.
+          </p>
+
+          <form
+            id="recoveryQuestionForm"
+            class="form"
+            autocomplete="off"
+          >
+            <label for="recoveryEmail">
+              E-mail cadastrado ou nome do proprietário
+            </label>
+
+            <input
+              id="recoveryEmail"
+              name="email"
+              type="text"
+              autocomplete="username"
+              required
+            />
+
+            <button
+              class="primary-btn"
+              type="submit"
+            >
+              Buscar pergunta
+            </button>
+          </form>
+
+          <form
+            id="resetPasswordForm"
+            class="form hidden"
+            autocomplete="off"
+          >
+            <label>
+              Pergunta de segurança
+            </label>
+
+            <div
+              id="recoveryQuestionText"
+              class="readonly-box"
+              aria-live="polite"
+            >
+              Aguardando identificação.
+            </div>
+
+            <label for="recoverySecurityAnswer">
+              Resposta
+            </label>
+
+            <input
+              id="recoverySecurityAnswer"
+              name="securityAnswer"
+              type="text"
+              autocomplete="off"
+              required
+            />
+
+            <label for="recoveryNewPassword">
+              Nova senha
+            </label>
+
+            <input
+              id="recoveryNewPassword"
+              name="newPassword"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+
+            <label for="recoveryConfirmPassword">
+              Confirmar nova senha
+            </label>
+
+            <input
+              id="recoveryConfirmPassword"
+              name="confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              required
+            />
+
+            <button
+              class="primary-btn"
+              type="submit"
+            >
+              Redefinir senha
+            </button>
+          </form>
+
+          <div class="auth-actions">
+            <button
+              id="backToLoginFromRecoveryBtn"
+              class="link-btn"
+              type="button"
+            >
+              Voltar para login
+            </button>
+          </div>
+        </section>
+        <p class="privacy-link"><a href="privacidade.html" target="_blank" rel="noopener">Leia a política de privacidade e uso de dados</a></p>
+      </section>
+    </div>
+  </main>
+
+  <!-- =====================================================
+       ÁREA INTERNA
+  ====================================================== -->
+
+  <main
+    id="appArea"
+    class="app-shell hidden"
+  >
+    <aside
+      id="sidebar"
+      class="sidebar"
+      aria-label="Menu principal"
+    >
+      <div class="brand">
+        <div
+          class="brand-icon"
+          aria-hidden="true"
+        >
+          <img src="icon-192.png" alt="" />
+        </div>
+
+        <div>
+          <h1>AquaGest Pro</h1>
+
+          <span id="sidebarUserLabel">
+            Usuário
+          </span>
+        </div>
+      </div>
+
+      <nav
+        class="main-nav"
+        aria-label="Módulos do AquaGest Pro"
+      >
+        <button
+          class="nav-item nav-link nav-btn active"
+          type="button"
+          data-screen="dashboard"
+        >
+          Painel
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="piscicultura"
+        >
+          Piscicultura
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="viveiros"
+        >
+          Viveiros
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="producao"
+        >
+          Produção
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="biometria"
+        >
+          Biometria
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="previsoes"
+        >
+          Previsões
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="dimensionamento"
+        >
+          Dimensionamento
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="sanidade"
+        >
+          Sanidade
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="agua"
+        >
+          Água
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="arracoamento"
+        >
+          Arraçoamento
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="estoque"
+        >
+          Estoque
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="financeiro"
+        >
+          Financeiro
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="relatorios"
+        >
+          Relatórios
+        </button>
+
+        <button
+          class="nav-item nav-link nav-btn"
+          type="button"
+          data-screen="configuracoes"
+        >
+          Configurações
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button
+          id="themeToggleBtn"
+          class="secondary-btn"
+          type="button"
+        >
+          Alternar tema
+        </button>
+
+        <button
+          id="logoutBtn"
+          class="secondary-btn"
+          type="button"
+        >
+          Sair
+        </button>
+
+        <small id="offlineStatus">
+          Modo Online
+        </small>
+      </div>
+    </aside>
+
+    <section class="main-content">
+      <header class="topbar">
+        <button
+          id="menuToggleBtn"
+          class="icon-btn"
+          type="button"
+          aria-label="Abrir menu"
+          aria-controls="sidebar"
+        >
+          ☰
+        </button>
+
+        <div>
+          <h2 id="screenTitle">
+            Painel
+          </h2>
+
+          <p id="screenSubtitle">
+            Resumo geral do AquaGest Pro.
+          </p>
+        </div>
+      </header>
+
+      <!-- ===================================================
+           STATUS GLOBAL
+      ==================================================== -->
+
+      <div class="status-grid">
+        <div class="status-card">
+          <strong>Banco local</strong>
+          <span id="dbStatus">
+            IndexedDB aguardando
+          </span>
+        </div>
+
+        <div class="status-card">
+          <strong>Aplicativo</strong>
+          <span id="appStatus">
+            Inicializando
+          </span>
+        </div>
+
+        <div class="status-card">
+          <strong>Service Worker</strong>
+          <span id="swStatus">
+            Aguardando registro
+          </span>
+        </div>
+
+        <div class="status-card">
+          <strong>Conexão</strong>
+          <span id="connectionStatus">
+            Verificando
+          </span>
+        </div>
+
+        <div class="status-card">
+          <strong>Autenticação</strong>
+          <span id="authStatus">
+            Não autenticado
+          </span>
+        </div>
+
+        <div class="status-card">
+          <strong>Piscicultura</strong>
+          <span id="propertyStatus">
+            Não cadastrada
+          </span>
+        </div>
+      </div>
+
+      <!-- ===================================================
+           TELAS
+      ==================================================== -->
+
+      <section id="screens">
+
+        <!-- Painel -->
+
+        <section
+          id="screen-dashboard"
+          class="screen active"
+        >
+          <section class="page-card">
+            <h3>Painel</h3>
+
+            <p>
+              Visão inicial do AquaGest Pro. Os indicadores técnicos
+              serão consolidados conforme os módulos produtivos e
+              financeiros avançarem.
+            </p>
+          </section>
+        </section>
+
+        <!-- =================================================
+             PISCICULTURA
+        ================================================== -->
+
+        <section
+          id="screen-piscicultura"
+          class="screen"
+        >
+          <section
+            id="propertySummaryBox"
+            class="page-card hidden"
+          >
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3 id="propertySummaryTitle">
+                  Piscicultura não cadastrada
+                </h3>
+
+                <span id="propertySummaryDescription">
+                  Preencha os dados da piscicultura.
+                </span>
+              </div>
+            </div>
+
+            <div class="status-grid">
+              <div class="status-card">
+                <strong>
+                  Código da Piscicultura
+                </strong>
+
+                <span id="propertySummaryId">
+                  Código será gerado ao salvar
+                </span>
+              </div>
+
+              <div class="status-card">
+                <strong>
+                  Responsável
+                </strong>
+
+                <span id="propertySummaryOwner">
+                  Responsável não informado
+                </span>
+              </div>
+
+              <div class="status-card">
+                <strong>
+                  Produção
+                </strong>
+
+                <span id="propertySummaryProduction">
+                  Produção não informada
+                </span>
+              </div>
+
+              <div class="status-card">
+                <strong>
+                  Sistema de cultivo
+                </strong>
+
+                <span id="propertySummarySystem">
+                  Sistema de cultivo não informado
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3 id="propertyFormTitle">
+                  Cadastrar piscicultura
+                </h3>
+
+                <span>
+                  Dados gerais da unidade produtiva.
+                </span>
+              </div>
+            </div>
+
+            <form
+              id="pisciculturaForm"
+              class="form"
+            >
+              <div class="form-grid">
+                <div>
+                  <label for="property_name">
+                    Nome da Piscicultura
+                  </label>
+
+                  <input
+                    id="property_name"
+                    name="name"
+                    type="text"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="property_ownerName">
+                    Responsável
+                  </label>
+
+                  <input
+                    id="property_ownerName"
+                    name="ownerName"
+                    type="text"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="property_document">
+                    CPF/CNPJ
+                  </label>
+
+                  <input
+                    id="property_document"
+                    name="document"
+                    type="text"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_email">
+                    E-mail
+                  </label>
+
+                  <input
+                    id="property_email"
+                    name="email"
+                    type="email"
+                    inputmode="email"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_phone">
+                    Celular
+                  </label>
+
+                  <input
+                    id="property_phone"
+                    name="phone"
+                    type="tel"
+                    inputmode="tel"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_city">
+                    Município
+                  </label>
+
+                  <input
+                    id="property_city"
+                    name="city"
+                    type="text"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_state">
+                    UF
+                  </label>
+
+                  <input
+                    id="property_state"
+                    name="state"
+                    type="text"
+                    maxlength="2"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_address">
+                    Endereço
+                  </label>
+
+                  <input
+                    id="property_address"
+                    name="address"
+                    type="text"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_area">
+                    Área
+                  </label>
+
+                  <input
+                    id="property_area"
+                    name="area"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="property_areaUnit">
+                    Unidade da área
+                  </label>
+
+                  <select
+                    id="property_areaUnit"
+                    name="areaUnit"
+                  >
+                    <option value="ha">
+                      ha
+                    </option>
+
+                    <option value="m2">
+                      m²
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="property_productionType">
+                    Tipo de produção
+                  </label>
+
+                  <select
+                    id="property_productionType"
+                    name="productionType"
+                  >
+                    <option value="Tilápia">
+                      Tilápia
+                    </option>
+
+                    <option value="Peixes nativos">
+                      Peixes nativos
+                    </option>
+
+                    <option value="Policultivo">
+                      Policultivo
+                    </option>
+
+                    <option value="Outro">
+                      Outro
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="property_systemType">
+                    Sistema de cultivo
+                  </label>
+
+                  <select
+                    id="property_systemType"
+                    name="systemType"
+                  >
+                    <option value="">
+                      Selecione
+                    </option>
+
+                    <option value="Viveiro escavado">
+                      Viveiro escavado
+                    </option>
+
+                    <option value="Tanque-rede">
+                      Tanque-rede
+                    </option>
+
+                    <option value="Geomembrana">
+                      Geomembrana
+                    </option>
+
+                    <option value="Recirculação">
+                      Recirculação
+                    </option>
+
+                    <option value="Outro">
+                      Outro
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <label for="property_notes">
+                Observações
+              </label>
+
+              <textarea
+                id="property_notes"
+                name="notes"
+                rows="3"
+              ></textarea>
+
+              <button
+                id="propertySubmitBtn"
+                class="primary-btn"
+                type="submit"
+              >
+                <span id="propertySubmitText">
+                  Salvar piscicultura
+                </span>
+              </button>
+            </form>
+          </section>
+        </section>
+
+        <!-- =================================================
+             VIVEIROS
+        ================================================== -->
+
+        <section
+          id="screen-viveiros"
+          class="screen"
+        >
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3 id="pondFormTitle">
+                  Cadastrar viveiro
+                </h3>
+
+                <span>
+                  Cadastro técnico dos viveiros da Piscicultura.
+                </span>
+              </div>
+            </div>
+
+            <form
+              id="viveiroForm"
+              class="form"
+            >
+              <input
+                id="pond_id"
+                name="id"
+                type="hidden"
+              />
+
+              <div class="form-grid">
+                <div>
+                  <label for="pond_name">
+                    Nome do viveiro
+                  </label>
+
+                  <input
+                    id="pond_name"
+                    name="name"
+                    type="text"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_structureType">
+                    Tipo de estrutura
+                  </label>
+
+                  <select
+                    id="pond_structureType"
+                    name="structureType"
+                    required
+                  >
+                    <option value="">
+                      Selecione
+                    </option>
+
+                    <option value="Viveiro escavado">
+                      Viveiro escavado
+                    </option>
+
+                    <option value="Tanque-rede">
+                      Tanque-rede
+                    </option>
+
+                    <option value="Geomembrana">
+                      Geomembrana
+                    </option>
+
+                    <option value="Outro">
+                      Outro
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="pond_areaM2">
+                    Área (m²)
+                  </label>
+
+                  <input
+                    id="pond_areaM2"
+                    name="areaM2"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_averageDepthM">
+                    Profundidade média (m)
+                  </label>
+
+                  <input
+                    id="pond_averageDepthM"
+                    name="averageDepthM"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_maxDensityKgM3">
+                    Densidade máxima recomendada (kg/m³)
+                  </label>
+
+                  <input
+                    id="pond_maxDensityKgM3"
+                    name="maxDensityKgM3"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_status">
+                    Status
+                  </label>
+
+                  <select
+                    id="pond_status"
+                    name="status"
+                  >
+                    <option value="active">
+                      Ativo
+                    </option>
+
+                    <option value="maintenance">
+                      Manutenção
+                    </option>
+
+                    <option value="inactive">
+                      Inativo
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="pond_volumeM3">
+                    Volume estimado
+                  </label>
+
+                  <input
+                    id="pond_volumeM3"
+                    name="volumeM3"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_maxBiomassKg">
+                    Biomassa máxima recomendada
+                  </label>
+
+                  <input
+                    id="pond_maxBiomassKg"
+                    name="maxBiomassKg"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_aeratorCount">
+                    Quantidade de aeradores
+                  </label>
+
+                  <input
+                    id="pond_aeratorCount"
+                    name="aeratorCount"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_aerationPowerHp">
+                    Potência total de aeração (cv)
+                  </label>
+
+                  <input
+                    id="pond_aerationPowerHp"
+                    name="aerationPowerHp"
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="pond_aeratorType">
+                    Tipo de aerador
+                  </label>
+
+                  <input
+                    id="pond_aeratorType"
+                    name="aeratorType"
+                    type="text"
+                  />
+                </div>
+              </div>
+
+              <label for="pond_notes">
+                Observações
+              </label>
+
+              <textarea
+                id="pond_notes"
+                name="notes"
+                rows="3"
+              ></textarea>
+
+              <div class="form-actions">
+                <button
+                  id="pondSubmitBtn"
+                  class="primary-btn"
+                  type="submit"
+                >
+                  <span id="pondSubmitText">
+                    Salvar viveiro
+                  </span>
+                </button>
+
+                <button
+                  id="pondCancelEditBtn"
+                  class="secondary-btn hidden"
+                  type="button"
+                >
+                  Cancelar edição
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>
+                  Viveiros cadastrados
+                </h3>
+
+                <span>
+                  Lista técnica dos viveiros da Piscicultura.
+                </span>
+              </div>
+            </div>
+
+            <div
+              id="pondsEmptyState"
+              class="empty-state"
+            >
+              Nenhum viveiro cadastrado.
+            </div>
+
+            <div
+              id="pondsTableWrapper"
+              class="table-wrapper hidden"
+            ></div>
+          </section>
+        </section>
+
+        <!-- =================================================
+             PRODUÇÃO
+        ================================================== -->
+
+        <section
+          id="screen-producao"
+          class="screen"
+        >
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>
+                  Entrada do lote
+                </h3>
+
+                <span>
+                  Registro inicial do lote produtivo.
+                </span>
+              </div>
+            </div>
+
+            <form
+              id="producaoForm"
+              class="form"
+            >
+              <input
+                id="production_cycleId"
+                name="cycleId"
+                type="hidden"
+              />
+
+              <input
+                id="production_stockingId"
+                name="stockingId"
+                type="hidden"
+              />
+
+              <div class="form-grid">
+                <div>
+                  <label for="production_pondId">
+                    Viveiro
+                  </label>
+
+                  <select
+                    id="production_pondId"
+                    name="pondId"
+                    required
+                  >
+                    <option value="">
+                      Selecione um viveiro ativo disponível
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="production_startDate">
+                    Data de alojamento
+                  </label>
+
+                  <input
+                    id="production_startDate"
+                    name="startDate"
+                    type="date"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="production_species">
+                    Espécie
+                  </label>
+
+                  <input
+                    id="production_species"
+                    name="species"
+                    type="text"
+                    value="Tilápia"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="production_category">
+                    Categoria
+                  </label>
+
+                  <select
+                    id="production_category"
+                    name="category"
+                    required
+                  >
+                    <option value="">
+                      Selecione
+                    </option>
+
+                    <option value="Alevino">
+                      Alevino
+                    </option>
+
+                    <option value="Juvenil">
+                      Juvenil
+                    </option>
+
+                    <option value="Terminação">
+                      Terminação
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="production_supplier">
+                    Fornecedor
+                  </label>
+
+                  <input
+                    id="production_supplier"
+                    name="supplier"
+                    type="text"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="production_quantity">
+                    Quantidade de peixes
+                  </label>
+
+                  <input
+                    id="production_quantity"
+                    name="quantity"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="production_averageWeightG">
+                    Peso médio inicial (g)
+                  </label>
+
+                  <input
+                    id="production_averageWeightG"
+                    name="averageWeightG"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="production_targetWeightG">
+                    Peso final desejado (g)
+                  </label>
+
+                  <input
+                    id="production_targetWeightG"
+                    name="targetWeightG"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="production_initialBiomassKg">
+                    Biomassa inicial
+                  </label>
+
+                  <input
+                    id="production_initialBiomassKg"
+                    name="initialBiomassKg"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="production_densityKgM3">
+                    Densidade inicial
+                  </label>
+
+                  <input
+                    id="production_densityKgM3"
+                    name="densityKgM3"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="production_capacityUsePercent">
+                    Uso da capacidade
+                  </label>
+
+                  <input
+                    id="production_capacityUsePercent"
+                    name="capacityUsePercent"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="production_technicalStatus">
+                    Situação técnica
+                  </label>
+
+                  <input
+                    id="production_technicalStatus"
+                    name="technicalStatus"
+                    type="text"
+                    readonly
+                    value="Aguardando dados"
+                  />
+                </div>
+              </div>
+
+              <label for="production_notes">
+                Observações
+              </label>
+
+              <textarea
+                id="production_notes"
+                name="notes"
+                rows="3"
+              ></textarea>
+
+              <div class="form-actions">
+                <button
+                  id="productionSubmitBtn"
+                  class="primary-btn"
+                  type="submit"
+                >
+                  <span id="productionSubmitText">
+                    Registrar entrada do lote
+                  </span>
+                </button>
+
+                <button
+                  id="productionCancelEditBtn"
+                  class="secondary-btn hidden"
+                  type="button"
+                >
+                  Cancelar edição
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>
+                  Lotes ativos
+                </h3>
+
+                <span>
+                  Lotes em produção na Piscicultura.
+                </span>
+              </div>
+            </div>
+
+            <div
+              id="productionEmptyState"
+              class="empty-state"
+            >
+              Nenhum lote ativo encontrado.
+            </div>
+
+            <div
+              id="productionListWrapper"
+              class="hidden"
+            ></div>
+          </section>
+        </section>
+
+        <!-- =================================================
+             BIOMETRIA
+        ================================================== -->
+
+        <section
+          id="screen-biometria"
+          class="screen"
+        >
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>
+                  Biometria
+                </h3>
+
+                <span>
+                  Registro técnico de crescimento, biomassa, CAA
+                  e recomendação alimentar.
+                </span>
+              </div>
+            </div>
+
+            <form
+              id="biometriaForm"
+              class="form"
+            >
+              <input
+                id="biometria_id"
+                name="id"
+                type="hidden"
+              />
+
+              <input
+                id="biometria_cycleId"
+                name="cycleId"
+                type="hidden"
+              />
+
+              <input
+                id="biometria_pondIdHidden"
+                name="pondId"
+                type="hidden"
+              />
+
+              <div class="form-grid">
+                <div>
+                  <label for="biometria_activeLotId">
+                    Lote ativo / viveiro
+                  </label>
+
+                  <select
+                    id="biometria_activeLotId"
+                    name="activeLotId"
+                    required
+                  >
+                    <option value="">
+                      Selecione um lote ativo
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label for="biometria_date">
+                    Data
+                  </label>
+
+                  <input
+                    id="biometria_date"
+                    name="date"
+                    type="date"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_sampleCount">
+                    Peixes amostrados
+                  </label>
+
+                  <input
+                    id="biometria_sampleCount"
+                    name="sampleCount"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_sampleTotalWeightG">
+                    Peso total da amostra (g)
+                  </label>
+
+                  <input
+                    id="biometria_sampleTotalWeightG"
+                    name="sampleTotalWeightG"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_mortality">
+                    Mortalidade no período
+                  </label>
+
+                  <input
+                    id="biometria_mortality"
+                    name="mortality"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_feedPeriodKg">
+                    Ração fornecida no período (kg)
+                  </label>
+
+                  <input
+                    id="biometria_feedPeriodKg"
+                    name="feedPeriodKg"
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_temperatureC">
+                    Temperatura da água (°C)
+                  </label>
+
+                  <input
+                    id="biometria_temperatureC"
+                    name="temperatureC"
+                    type="number"
+                    step="0.1"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_usedFeedingPercent">
+                    % biomassa usado
+                  </label>
+
+                  <input
+                    id="biometria_usedFeedingPercent"
+                    name="usedFeedingPercent"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_mealsPerDay">
+                    Tratos por dia
+                  </label>
+
+                  <input
+                    id="biometria_mealsPerDay"
+                    name="mealsPerDay"
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputmode="numeric"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_projectedFcr">
+                    CAA projetada
+                  </label>
+
+                  <input
+                    id="biometria_projectedFcr"
+                    name="projectedFcr"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputmode="decimal"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_averageWeightG">
+                    Peso médio atual
+                  </label>
+
+                  <input
+                    id="biometria_averageWeightG"
+                    name="averageWeightG"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_currentPopulation">
+                    Saldo atual
+                  </label>
+
+                  <input
+                    id="biometria_currentPopulation"
+                    name="currentPopulation"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_currentBiomassKg">
+                    Biomassa atual
+                  </label>
+
+                  <input
+                    id="biometria_currentBiomassKg"
+                    name="currentBiomassKg"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_feedTotalKg">
+                    Total de ração do lote
+                  </label>
+
+                  <input
+                    id="biometria_feedTotalKg"
+                    name="feedTotalKg"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_periodDays">
+                    Dias do período
+                  </label>
+
+                  <input
+                    id="biometria_periodDays"
+                    name="periodDays"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_gpdGDay">
+                    GPD
+                  </label>
+
+                  <input
+                    id="biometria_gpdGDay"
+                    name="gpdGDay"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_fcrPeriod">
+                    CAA do período
+                  </label>
+
+                  <input
+                    id="biometria_fcrPeriod"
+                    name="fcrPeriod"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_fcrTotal">
+                    CAA geral
+                  </label>
+
+                  <input
+                    id="biometria_fcrTotal"
+                    name="fcrTotal"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_currentDensityKgM3">
+                    Densidade atual
+                  </label>
+
+                  <input
+                    id="biometria_currentDensityKgM3"
+                    name="currentDensityKgM3"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_capacityUsePercent">
+                    Uso da capacidade
+                  </label>
+
+                  <input
+                    id="biometria_capacityUsePercent"
+                    name="capacityUsePercent"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_technicalStatus">
+                    Situação técnica
+                  </label>
+
+                  <input
+                    id="biometria_technicalStatus"
+                    name="technicalStatus"
+                    type="text"
+                    readonly
+                    value="Aguardando dados"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_suggestedFeedingPercent">
+                    % biomassa sugerido
+                  </label>
+
+                  <input
+                    id="biometria_suggestedFeedingPercent"
+                    name="suggestedFeedingPercent"
+                    type="text"
+                    readonly
+                    value="Calculado automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_recommendedFeedDayKg">
+                    Ração recomendada/dia
+                  </label>
+
+                  <input
+                    id="biometria_recommendedFeedDayKg"
+                    name="recommendedFeedDayKg"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+
+                <div>
+                  <label for="biometria_recommendedFeedMealKg">
+                    Ração recomendada/trato
+                  </label>
+
+                  <input
+                    id="biometria_recommendedFeedMealKg"
+                    name="recommendedFeedMealKg"
+                    type="text"
+                    readonly
+                    value="Calculada automaticamente"
+                  />
+                </div>
+              </div>
+
+              <label for="biometria_notes">
+                Observações
+              </label>
+
+              <textarea
+                id="biometria_notes"
+                name="notes"
+                rows="3"
+              ></textarea>
+
+              <div class="form-actions">
+                <button
+                  id="biometriaSubmitBtn"
+                  class="primary-btn"
+                  type="submit"
+                >
+                  <span id="biometriaSubmitText">
+                    Registrar biometria
+                  </span>
+                </button>
+
+                <button
+                  id="biometriaCancelEditBtn"
+                  class="secondary-btn hidden"
+                  type="button"
+                >
+                  Cancelar edição
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>
+                  Histórico de biometrias
+                </h3>
+
+                <span>
+                  Registros técnicos do lote.
+                </span>
+              </div>
+            </div>
+
+            <div
+              id="biometriaEmptyState"
+              class="empty-state"
+            >
+              Nenhuma biometria registrada.
+            </div>
+
+            <div
+              id="biometriaListWrapper"
+              class="hidden"
+            ></div>
+          </section>
+        </section>
+
+        <!-- =================================================
+             PREVISÕES
+        ================================================== -->
+
+        <section
+          id="screen-previsoes"
+          class="screen"
+        >
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>Previsão de crescimento e biomassa</h3>
+                <span>Modelo TGC com estimativa preliminar para apoio ao planejamento.</span>
+              </div>
+            </div>
+
+            <form id="predictionForm" class="form">
+              <div class="form-grid">
+                <div>
+                  <label for="prediction_startWeightG">Peso inicial (g)</label>
+                  <input id="prediction_startWeightG" type="number" min="0.01" step="0.01" required />
+                </div>
+                <div>
+                  <label for="prediction_endWeightG">Peso final observado (g)</label>
+                  <input id="prediction_endWeightG" type="number" min="0.01" step="0.01" required />
+                </div>
+                <div>
+                  <label for="prediction_temperatureC">Temperatura média (°C)</label>
+                  <input id="prediction_temperatureC" type="number" min="0.1" step="0.1" required />
+                </div>
+                <div>
+                  <label for="prediction_days">Dias observados</label>
+                  <input id="prediction_days" type="number" min="1" step="1" required />
+                </div>
+                <div>
+                  <label for="prediction_projectionDays">Dias para projeção</label>
+                  <input id="prediction_projectionDays" type="number" min="1" step="1" value="30" required />
+                </div>
+                <div>
+                  <label for="prediction_population">Peixes vivos projetados</label>
+                  <input id="prediction_population" type="number" min="0" step="1" required />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="primary-btn" type="submit">Calcular pelo TGC</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="page-card">
+            <div class="status-grid prediction-results">
+              <div class="status-card"><strong>TGC</strong><span id="prediction_tgcResult">Aguardando dados</span></div>
+              <div class="status-card"><strong>Peso projetado</strong><span id="prediction_weightResult">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Biomassa projetada</strong><span id="prediction_biomassResult">Aguardando cálculo</span></div>
+            </div>
+            <p id="prediction_status" class="technical-note">O resultado é uma estimativa e deve ser comparado aos dados reais.</p>
+            <div class="form-actions">
+              <button id="predictionTrainBtn" class="secondary-btn" type="button">Treinar modelo local com biometrias</button>
+            </div>
+            <p id="prediction_mlStatus" class="technical-note">O treinamento exige pelo menos oito observações consecutivas com dados de biometria.</p>
+          </section>
+        </section>
+
+        <!-- =================================================
+             DIMENSIONAMENTO BÁSICO
+        ================================================== -->
+
+        <section
+          id="screen-dimensionamento"
+          class="screen"
+        >
+          <section class="page-card dimensionamento-intro-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>Dimensionamento básico da aeração</h3>
+                <span>Estimativa inicial de capacidade natural, biomassa excedente e potência dos aeradores.</span>
+              </div>
+            </div>
+
+            <div class="dimensionamento-assumption">
+              <strong>Regra de referência</strong>
+              <span>600 kg de peixe por 1.000 m² sem aeração adicional e 1.000 a 1.500 kg adicionais por CV de aeração.</span>
+            </div>
+
+            <form id="dimensionamentoForm" class="form">
+              <div class="form-grid">
+                <div>
+                  <label for="dimension_species">Espécie de peixe</label>
+                  <input id="dimension_species" type="text" placeholder="Ex.: tilápia, tambaqui ou pirarucu" required />
+                </div>
+                <div>
+                  <label for="dimension_targetProductionKg">Produção desejada (kg)</label>
+                  <input id="dimension_targetProductionKg" type="number" min="0.01" step="0.01" placeholder="Ex.: 5.000" required />
+                </div>
+                <div>
+                  <label for="dimension_pondAreaM2">Área total dos viveiros (m²)</label>
+                  <input id="dimension_pondAreaM2" type="number" min="0.01" step="0.01" placeholder="Ex.: 1.000" required />
+                </div>
+                <div>
+                  <label for="dimension_equipmentPowerCv">Potência de cada aerador (CV)</label>
+                  <input id="dimension_equipmentPowerCv" type="number" min="0.01" step="0.1" value="1.5" required />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="primary-btn" type="submit">Calcular dimensionamento</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="page-card">
+            <div class="status-grid dimensionamento-results">
+              <div class="status-card"><strong>Capacidade natural</strong><span id="dimension_naturalCapacity">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Densidade final</strong><span id="dimension_density">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Biomassa excedente</strong><span id="dimension_additionalBiomass">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Faixa de potência</strong><span id="dimension_powerRange">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Aeradores estimados</strong><span id="dimension_aeratorCount">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Potência instalada</strong><span id="dimension_installedPower">Aguardando cálculo</span></div>
+            </div>
+            <div id="dimension_status" class="dimensionamento-alert" role="status" aria-live="polite">Informe os dados para avaliar a necessidade de aeração.</div>
+            <p id="dimension_recommendation" class="technical-note">A recomendação será apresentada após o cálculo.</p>
+            <p id="dimension_context" class="technical-note"></p>
+            <div id="dimension_autoDecisionCard" class="dimensionamento-auto-card is-idle" role="status" aria-live="polite">
+              <div>
+                <span class="section-kicker">Decisão automática de manejo</span>
+                <h4 id="dimension_autoDecision">Aguardando dados do dimensionamento</h4>
+                <p id="dimension_autoAction">Preencha os dados para ativar a decisão automática baseada na biomassa e no horário local.</p>
+              </div>
+              <span id="dimension_autoDecisionTime">Atualização automática a cada minuto</span>
+            </div>
+          </section>
+
+          <section class="page-card">
+            <div class="toolbar-title">
+              <h3>Regra de manejo horário</h3>
+              <span>Use como orientação inicial; confirme a necessidade com medições de oxigênio dissolvido.</span>
+            </div>
+            <div class="table-wrapper dimensionamento-table-wrapper">
+              <table class="dimensionamento-table">
+                <thead>
+                  <tr><th>Horário</th><th>Objetivo do manejo</th><th>Justificativa técnica</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>15:00–17:00</td><td>Quebrar a estratificação</td><td>Misturar a camada superficial e a água do fundo, reduzindo diferenças de temperatura e oxigênio.</td></tr>
+                  <tr><td>18:00–22:00</td><td>Desligado — regra geral</td><td>Em condições normais, ainda há oxigênio acumulado durante o período de luz.</td></tr>
+                  <tr><td>23:00–06:00</td><td>Oxigenação de emergência</td><td>Período crítico sem fotossíntese: peixes, algas e matéria orgânica continuam consumindo oxigênio.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="page-card dimensionamento-reference-card">
+            <h3>Limites de uso</h3>
+            <p>Este módulo aplica as regras informadas para uma estimativa básica. Não substitui projeto de aeração, medição de oxigênio dissolvido, avaliação hidráulica ou orientação de responsável técnico.</p>
+            <ul class="dimensionamento-reference-list">
+              <li>Considere espécie, profundidade, renovação de água, taxa de arraçoamento, matéria orgânica e clima.</li>
+              <li>Use a capacidade real do aerador (CV, vazão e eficiência), não apenas a potência nominal.</li>
+              <li>Para aprofundamento, consulte o guia técnico da Embrapa Pesca, a Panorama da Aquicultura e os materiais de capacitação da CPT.</li>
+            </ul>
+          </section>
+        </section>
+
+        <!-- =================================================
+             SANIDADE
+        ================================================== -->
+
+        <section
+          id="screen-sanidade"
+          class="screen"
+        >
+          <section class="page-card">
+            <div class="toolbar">
+              <div class="toolbar-title">
+                <h3>Sanidade do lote</h3>
+                <span>Registre sinais, ocorrência, conduta e mortalidade relacionada.</span>
+              </div>
+            </div>
+            <form id="sanidadeForm" class="form">
+              <div class="form-grid">
+                <div>
+                  <label for="health_date">Data</label>
+                  <input id="health_date" type="date" required />
+                </div>
+                <div>
+                  <label for="health_cycleId">Lote produtivo</label>
+                  <select id="health_cycleId"><option value="">Sem vínculo com lote</option></select>
+                </div>
+                <div>
+                  <label for="health_occurrenceType">Ocorrência</label>
+                  <select id="health_occurrenceType" required>
+                    <option value="">Selecione</option>
+                    <option>Suspeita clínica</option><option>Doença</option><option>Parasita</option>
+                    <option>Ferimento</option><option>Tratamento preventivo</option><option>Observação sanitária</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="health_severity">Gravidade</label>
+                  <select id="health_severity"><option>Baixa</option><option>Moderada</option><option>Alta</option><option>Crítica</option></select>
+                </div>
+                <div>
+                  <label for="health_mortalityCount">Mortalidade relacionada</label>
+                  <input id="health_mortalityCount" type="number" min="0" step="1" value="0" />
+                </div>
+                <div>
+                  <label for="health_medication">Medicamento/produto</label>
+                  <input id="health_medication" type="text" />
+                </div>
+              </div>
+              <label for="health_signs">Sinais observados</label>
+              <textarea id="health_signs" rows="2" placeholder="Comportamento, lesões, apetite ou alterações observadas"></textarea>
+              <label for="health_diagnosis">Hipótese/diagnóstico técnico</label>
+              <textarea id="health_diagnosis" rows="2"></textarea>
+              <label for="health_treatment">Conduta/tratamento</label>
+              <textarea id="health_treatment" rows="2"></textarea>
+              <label for="health_notes">Observações</label>
+              <textarea id="health_notes" rows="2"></textarea>
+              <div class="form-actions"><button class="primary-btn" type="submit">Salvar registro sanitário</button></div>
+            </form>
+          </section>
+          <section class="page-card">
+            <h3>Histórico sanitário</h3>
+            <div id="healthEmptyState" class="empty-state">Nenhum registro sanitário.</div>
+            <div id="healthListWrapper" class="hidden"></div>
+          </section>
+        </section>
+
+        <!-- =================================================
+             TELAS DINÂMICAS
+        ================================================== -->
+
+        <section
+          id="screen-agua"
+          class="screen"
+        ></section>
+
+        <section
+          id="screen-arracoamento"
+          class="screen"
+        ></section>
+
+        <section
+          id="screen-estoque"
+          class="screen"
+        ></section>
+
+        <section
+          id="screen-financeiro"
+          class="screen"
+        ></section>
+
+        <!-- =================================================
+             RELATÓRIOS
+        ================================================== -->
+
+        <section
+          id="screen-relatorios"
+          class="screen"
+        >
+          <section class="page-card">
+            <h3>
+              Relatórios
+            </h3>
+
+            <p>
+              Relatórios técnicos e econômicos serão consolidados
+              após a finalização dos módulos operacionais e financeiros.
+            </p>
+          </section>
+        </section>
+
+        <!-- =================================================
+             CONFIGURAÇÕES
+        ================================================== -->
+
+        <section
+          id="screen-configuracoes"
+          class="screen"
+        >
+          <section class="page-card">
+            <h3>
+              Configurações
+            </h3>
+
+            <p>
+              Configurações gerais do AquaGest Pro.
+            </p>
+          </section>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <!-- =====================================================
+       INFRAESTRUTURA CENTRAL
+  ====================================================== -->
+
+  <script src="app.js"></script>
+  
+  
+  
+  
+  
+  
+  
+  
+
+  <!-- =====================================================
+       AUTENTICAÇÃO
+  ====================================================== -->
+
+  
+  
+  
+
+  <!-- =====================================================
+       PISCICULTURA
+  ====================================================== -->
+
+  
+  
+  
+
+  <!-- =====================================================
+       VIVEIROS
+  ====================================================== -->
+
+  
+  
+
+  <!-- =====================================================
+       PRODUÇÃO
+  ====================================================== -->
+
+  
+  
+
+  <!-- =====================================================
+       BIOMETRIA
+  ====================================================== -->
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+  <!-- =====================================================
+       ÁGUA
+  ====================================================== -->
+
+  
+  
+
+  <!-- =====================================================
+       ARRAÇOAMENTO
+  ====================================================== -->
+
+  
+  
+  
+  
+  
+  
+
+  <!-- =====================================================
+       ESTOQUE
+  ====================================================== -->
+
+  
+  
+
+  <!-- =====================================================
+       FINANCEIRO
+  ====================================================== -->
+
+  
+  
+
+  <!-- =====================================================
+       INFRAESTRUTURA GLOBAL DE DATAS
+  ====================================================== -->
+
+  
+  
+
+  <!-- =====================================================
+       ORQUESTRADOR GLOBAL — SEMPRE POR ÚLTIMO
+  ====================================================== -->
+
+  
+  
+  
+</body>
+</html>
