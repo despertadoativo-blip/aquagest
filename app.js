@@ -1,5 +1,32 @@
 ;
 
+/* ===== js/core/number-parser.js ===== */
+/*
+  AquaGest Pro — leitor único de números.
+  Regra: com vírgula = formato brasileiro (ponto é milhar, vírgula é decimal);
+  sem vírgula = o ponto é sempre decimal. "0.500" → 0,5; "1.500,5" → 1500,5.
+*/
+(function () {
+  "use strict";
+  var root = typeof window !== "undefined" ? window : globalThis;
+
+  function parse(value, fallback) {
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s ]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var n = Number(text);
+    return Number.isFinite(n) ? n : fb;
+  }
+
+  root.AquaGestNumber = { parse: parse };
+  if (typeof module !== "undefined") module.exports = root.AquaGestNumber;
+})();
+
+;
+
 /* ===== js/core/id-generator.js ===== */
 // @ts-nocheck
 
@@ -1080,59 +1107,17 @@
   */
 
   function toNumber(value, fallback) {
-    var fallbackValue =
-      fallback === undefined
-        ? 0
-        : fallback;
-
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      return fallbackValue;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value)
-        ? value
-        : fallbackValue;
-    }
-
-    var text = String(value)
-      .trim()
-      .replace(/\s/g, "");
-
-    if (!text) {
-      return fallbackValue;
-    }
-
-    /*
-      Formato brasileiro:
-      1.234,56
-    */
-    if (
-      text.indexOf(",") >= 0 &&
-      text.indexOf(".") >= 0
-    ) {
-      text = text
-        .replace(/\./g, "")
-        .replace(",", ".");
-    } else if (
-      text.indexOf(",") >= 0
-    ) {
-      text = text.replace(",", ".");
-    } else if (
-      /^\d{1,3}(\.\d{3})+$/.test(text)
-    ) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number)
-      ? number
-      : fallbackValue;
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function toNullableNumber(value) {
@@ -4638,9 +4623,18 @@
   var FORMAT = "aquagest-lite-ml-anonimo";
   var VERSION = 1;
 
-  function number(value) {
-    var parsed = Number(String(value === null || value === undefined ? "" : value).replace(",", "."));
-    return Number.isFinite(parsed) ? parsed : 0;
+  function number(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
   function round(value, decimals) {
     var factor = Math.pow(10, decimals || 3);
@@ -4666,12 +4660,13 @@
         peso_medio_g: round(row.peso_medio_g, 3),
         biomassa_kg: round(row.biomassa_kg, 3),
         temperatura_media_c: round(row.temperatura_media_c, 3),
-        dias_cultivo: round(row.dias_cultivo, 3),
+        intervalo_dias: round(row.intervalo_dias, 3),
         racao_kg: round(row.racao_kg, 3),
         mortalidade: round(row.mortalidade, 0),
-        ph: round(row.ph, 3),
-        oxigenio_mg_l: round(row.oxigenio_mg_l, 3),
-        amonia_mg_l: round(row.amonia_mg_l, 3),
+        /* Parâmetros de água não medidos ficam vazios (nunca 0). */
+        ph: row.ph > 0 ? round(row.ph, 3) : null,
+        oxigenio_mg_l: row.oxigenio_mg_l > 0 ? round(row.oxigenio_mg_l, 3) : null,
+        amonia_mg_l: row.amonia_mg_l > 0 ? round(row.amonia_mg_l, 3) : null,
         peso_futuro_g: round(row.peso_futuro_g, 3),
         biomassa_futura_kg: round(row.biomassa_futura_kg, 3)
       };
@@ -4871,20 +4866,159 @@
 ;
 
 /* ===== js/core/technical-engine.js ===== */
-/* AquaGest Lite — motor técnico centralizado (SENAR + Furuya). */
+/* AquaGest Pro — motor técnico centralizado (SENAR + Furuya). */
 (function () {
   "use strict";
-  var WARNING = "Projeção de crescimento incompatível com o planejamento. O desempenho atual indica atraso em relação ao ciclo planejado de 180 dias.";
-  function n(v) { if (v === null || v === undefined || v === "") return 0; if (typeof v === "number") return Number.isFinite(v) ? v : 0; var s = String(v).trim().replace(/\s/g, ""); if (s.indexOf(",") >= 0 && s.indexOf(".") >= 0) s = s.replace(/\./g, "").replace(",", "."); else s = s.replace(",", "."); var x = Number(s); return Number.isFinite(x) ? x : 0; }
+
+  var DEFAULT_PLANNED_DAYS = 180;
+
+  function n(v) {
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(v);
+    if (v === null || v === undefined || v === "") return 0;
+    if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+    var s = String(v).trim().replace(/\s/g, "");
+    if (s.indexOf(",") >= 0) s = s.replace(/\./g, "").replace(",", ".");
+    var x = Number(s);
+    return Number.isFinite(x) ? x : 0;
+  }
+
   function r(v, d) { var f = Math.pow(10, d || 2); return Math.round(n(v) * f) / f; }
-  function addDays(value, days) { if (!value) return ""; var d = new Date(String(value) + "T00:00:00"); if (Number.isNaN(d.getTime())) return ""; d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); }
-  function calculateNH3(tan, ph, temperature) { tan = n(tan); ph = n(ph); temperature = n(temperature); if (tan <= 0 || ph <= 0 || temperature <= 0) return 0; var pka = 0.09018 + 2729.92 / (273.2 + temperature); return r(tan / (1 + Math.pow(10, pka - ph)), 4); }
-  function feedingTemperatureFactor(value) { var t = n(value); if (t < 16) return 0; if (t < 20) return 0.5; if (t < 25) return 0.8; if (t <= 30) return 1; if (t <= 32) return 0.7; return 0; }
-  function classifyWater(data) { var x = data || {}, tan = n(x.tanMgL !== undefined ? x.tanMgL : x.ammoniaTotalMgL), nh3 = x.nh3MgL !== undefined && x.nh3MgL !== "" ? n(x.nh3MgL) : calculateNH3(tan, x.ph, x.temperatureC), nitrite = n(x.nitriteMgL), results = []; if (tan > 0 || x.hasTanMgL || x.hasAmmoniaTotalMgL) results.push({ key: "tanMgL", label: "TAN", value: r(tan, 3), unit: "mg/L", severity: "normal", status: "Adequado", message: "TAN informado; o parâmetro crítico é o NH3 calculado." }); if (nh3 > 0 || x.hasNh3MgL || tan > 0) results.push({ key: "nh3MgL", label: "NH3 (amônia não ionizada)", value: r(nh3, 4), unit: "mg/L", severity: nh3 >= 0.2 ? "critical" : "normal", status: nh3 >= 0.2 ? "Crítico" : "Adequado", message: nh3 >= 0.2 ? "NH3 >= 0,2 mg/L: suspender alimentação e corrigir a qualidade da água." : "NH3 abaixo do limite crítico de 0,2 mg/L." }); if (x.hasNitriteMgL || nitrite > 0) results.push({ key: "nitriteMgL", label: "Nitrito", value: r(nitrite, 3), unit: "mg/L", severity: nitrite >= 0.3 ? "warning" : "normal", status: nitrite >= 0.3 ? "Atenção" : "Adequado", message: nitrite >= 0.3 ? "Nitrito >= 0,3 mg/L: reduzir alimentação e intensificar manejo e monitoramento." : "Nitrito abaixo do limite de manejo de 0,3 mg/L." }); var factor = feedingTemperatureFactor(x.temperatureC); if (nh3 >= 0.2) factor = 0; else if (nitrite >= 0.3) factor = Math.min(factor, 0.7); return { tanMgL: r(tan, 3), nh3MgL: r(nh3, 4), nitriteMgL: r(nitrite, 3), parameterResults: results, waterFeedingFactor: factor, recommendedFeedingAction: factor === 0 ? "Suspender arraçoamento" : factor < 1 ? "Reduzir arraçoamento" : "Manter arraçoamento", technicalSeverity: nh3 >= 0.2 ? "critical" : nitrite >= 0.3 ? "warning" : "normal", technicalStatus: nh3 >= 0.2 ? "Crítico — suspender alimentação" : nitrite >= 0.3 ? "Atenção — reduzir alimentação" : "Dentro dos parâmetros recomendados" }; }
-  var FEED_PROFILES = [{ phase: "reversao", phaseLabel: "Reversão", minWeightG: 0, maxWeightG: 30, crudeProteinPercent: 41.30, source: "Furuya" }, { phase: "pos_reversao", phaseLabel: "Pós-reversão até 100 g", minWeightG: 30, maxWeightG: 100, crudeProteinPercent: 29.73, source: "Furuya" }, { phase: "terminacao", phaseLabel: "Acima de 100 g", minWeightG: 100, maxWeightG: 999999, crudeProteinPercent: 26.80, source: "Furuya" }];
-  function feedProfile(weight) { weight = n(weight); return FEED_PROFILES.find(function (p) { return weight >= p.minWeightG && weight < p.maxWeightG; }) || FEED_PROFILES[2]; }
-  function harvestProjection(startDate, currentDate, averageWeight, targetWeight, gpd) { var planned = addDays(startDate, 180), remaining = Math.max(0, n(targetWeight) - n(averageWeight)), days = n(gpd) > 0 && remaining > 0 ? Math.ceil(remaining / n(gpd)) : 0, projected = currentDate && days ? addDays(currentDate, days) : "", compatible = !planned || !projected || projected <= planned; return { plannedHarvestDate: planned, performanceProjectedHarvestDate: projected, projectedDaysToTarget: days, harvestProjectionCompatible: compatible, harvestProjectionWarning: compatible ? "" : WARNING }; }
-  window.TechnicalEngine = { version: "v8-senar-furuya", constants: { plannedCycleDays: 180, nh3CriticalMgL: 0.2, nitriteManagementMgL: 0.3 }, calculateNH3: calculateNH3, feedingTemperatureFactor: feedingTemperatureFactor, classifyWater: classifyWater, feedProfiles: FEED_PROFILES, feedProfile: feedProfile, harvestProjection: harvestProjection };
+
+  /* Datas em horário local (evita virar o dia após as 21 h em Brasília). */
+  function localIso(d) {
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function addDays(value, days) {
+    if (!value) return "";
+    var d = new Date(String(value).slice(0, 10) + "T12:00:00");
+    if (Number.isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + days);
+    return localIso(d);
+  }
+
+  function calculateNH3(tan, ph, temperature) {
+    tan = n(tan); ph = n(ph); temperature = n(temperature);
+    if (tan <= 0 || ph <= 0 || temperature <= 0) return 0;
+    var pka = 0.09018 + 2729.92 / (273.2 + temperature);
+    return r(tan / (1 + Math.pow(10, pka - ph)), 4);
+  }
+
+  /*
+    Tabela ÚNICA de temperatura para arraçoamento de tilápia.
+    Usada por biometria, qualidade da água e arraçoamento.
+  */
+  var TEMPERATURE_TABLE = [
+    { below: 16, factor: 0, label: "Arraçoamento suspenso", message: "Temperatura abaixo de 16 °C. Suspender o fornecimento de ração." },
+    { below: 20, factor: 0.5, label: "Consumo muito reduzido", message: "Temperatura baixa. Usar cerca de 50% da recomendação base." },
+    { below: 25, factor: 0.8, label: "Consumo reduzido", message: "Temperatura abaixo do ideal. Usar cerca de 80% da recomendação base." },
+    { upTo: 30, factor: 1, label: "Faixa adequada", message: "Temperatura favorável para alimentação da tilápia." },
+    { upTo: 32, factor: 0.7, label: "Atenção por temperatura elevada", message: "Temperatura elevada. Usar cerca de 70% da recomendação base e observar o oxigênio dissolvido." }
+  ];
+
+  function feedingTemperatureInfo(value) {
+    var t = n(value);
+    if (t <= 0) return { factor: 1, label: "Temperatura não informada", message: "Percentual sem ajuste por temperatura." };
+    for (var i = 0; i < TEMPERATURE_TABLE.length; i += 1) {
+      var row = TEMPERATURE_TABLE[i];
+      if ((row.below !== undefined && t < row.below) || (row.upTo !== undefined && t <= row.upTo)) {
+        return { factor: row.factor, label: row.label, message: row.message };
+      }
+    }
+    return { factor: 0, label: "Arraçoamento suspenso", message: "Temperatura acima de 32 °C. Suspender a alimentação e monitorar o oxigênio dissolvido." };
+  }
+
+  function feedingTemperatureFactor(value) {
+    return feedingTemperatureInfo(value).factor;
+  }
+
+  /*
+    Classificação de NH3 (calculada) e nitrito.
+    chemistryFactor considera só NH3 e nitrito; a temperatura é tratada à parte.
+  */
+  function classifyWater(data) {
+    var x = data || {};
+    var tan = n(x.tanMgL !== undefined ? x.tanMgL : x.ammoniaTotalMgL);
+    /* NH3 informada só vale se foi realmente digitada; um 0 de preenchimento não pode impedir o cálculo pela TAN. */
+    var nh3Provided = x.hasNh3MgL === true || (x.hasNh3MgL === undefined && n(x.nh3MgL) > 0);
+    var nh3 = nh3Provided ? n(x.nh3MgL) : calculateNH3(tan, x.ph, x.temperatureC);
+    var nitrite = n(x.nitriteMgL);
+    var results = [];
+
+    if (tan > 0 || x.hasTanMgL || x.hasAmmoniaTotalMgL) {
+      results.push({ key: "tanMgL", label: "TAN", value: r(tan, 3), unit: "mg/L", severity: "normal", status: "Adequado", message: "TAN informado; o parâmetro crítico é o NH3 calculado." });
+    }
+    if (nh3 > 0 || x.hasNh3MgL || tan > 0) {
+      results.push({ key: "nh3MgL", label: "NH3 (amônia não ionizada)", value: r(nh3, 4), unit: "mg/L", severity: nh3 >= 0.2 ? "critical" : "normal", status: nh3 >= 0.2 ? "Crítico" : "Adequado", message: nh3 >= 0.2 ? "NH3 >= 0,2 mg/L: suspender alimentação e corrigir a qualidade da água." : "NH3 abaixo do limite crítico de 0,2 mg/L." });
+    }
+    if (x.hasNitriteMgL || nitrite > 0) {
+      results.push({ key: "nitriteMgL", label: "Nitrito", value: r(nitrite, 3), unit: "mg/L", severity: nitrite >= 0.3 ? "warning" : "normal", status: nitrite >= 0.3 ? "Atenção" : "Adequado", message: nitrite >= 0.3 ? "Nitrito >= 0,3 mg/L: reduzir alimentação e intensificar manejo e monitoramento." : "Nitrito abaixo do limite de manejo de 0,3 mg/L." });
+    }
+
+    var chemistryFactor = 1;
+    if (nh3 >= 0.2) chemistryFactor = 0;
+    else if (nitrite >= 0.3) chemistryFactor = 0.7;
+
+    var temperatureFactor = feedingTemperatureFactor(x.temperatureC);
+    var factor = Math.min(temperatureFactor, chemistryFactor);
+
+    return {
+      tanMgL: r(tan, 3),
+      nh3MgL: r(nh3, 4),
+      nitriteMgL: r(nitrite, 3),
+      parameterResults: results,
+      chemistryFactor: chemistryFactor,
+      temperatureFactor: temperatureFactor,
+      waterFeedingFactor: factor,
+      recommendedFeedingAction: factor === 0 ? "Suspender arraçoamento" : factor < 1 ? "Reduzir arraçoamento" : "Manter arraçoamento",
+      technicalSeverity: nh3 >= 0.2 ? "critical" : nitrite >= 0.3 ? "warning" : "normal",
+      technicalStatus: nh3 >= 0.2 ? "Crítico — suspender alimentação" : nitrite >= 0.3 ? "Atenção — reduzir alimentação" : "Dentro dos parâmetros recomendados"
+    };
+  }
+
+  /* Referência de proteína (Furuya). É informativa: não substitui a faixa mínima/máxima da tabela nutricional. */
+  var FEED_PROFILES = [
+    { phase: "larvas_alevinos", phaseLabel: "Larvas e alevinos (até 30 g)", minWeightG: 0, maxWeightG: 30, crudeProteinPercent: 41.30, source: "Furuya" },
+    { phase: "juvenil_recria", phaseLabel: "Juvenil / recria (30 a 100 g)", minWeightG: 30, maxWeightG: 100, crudeProteinPercent: 29.73, source: "Furuya" },
+    { phase: "terminacao", phaseLabel: "Terminação (acima de 100 g)", minWeightG: 100, maxWeightG: 999999, crudeProteinPercent: 26.80, source: "Furuya" }
+  ];
+
+  function feedProfile(weight) {
+    weight = n(weight);
+    return FEED_PROFILES.find(function (p) { return weight >= p.minWeightG && weight < p.maxWeightG; }) || FEED_PROFILES[2];
+  }
+
+  function harvestProjection(startDate, currentDate, averageWeight, targetWeight, gpd, plannedDays) {
+    var cycleDays = n(plannedDays) > 0 ? Math.round(n(plannedDays)) : DEFAULT_PLANNED_DAYS;
+    var planned = addDays(startDate, cycleDays);
+    var remaining = Math.max(0, n(targetWeight) - n(averageWeight));
+    var days = n(gpd) > 0 && remaining > 0 ? Math.ceil(remaining / n(gpd)) : 0;
+    var projected = currentDate && days ? addDays(currentDate, days) : "";
+    var compatible = !planned || !projected || projected <= planned;
+    return {
+      plannedCycleDays: cycleDays,
+      plannedHarvestDate: planned,
+      performanceProjectedHarvestDate: projected,
+      projectedDaysToTarget: days,
+      harvestProjectionCompatible: compatible,
+      harvestProjectionWarning: compatible ? "" : "Projeção de crescimento incompatível com o planejamento. O desempenho atual indica atraso em relação ao ciclo planejado de " + cycleDays + " dias."
+    };
+  }
+
+  window.TechnicalEngine = {
+    version: "v9-avaliacao-tecnica",
+    constants: { plannedCycleDays: DEFAULT_PLANNED_DAYS, nh3CriticalMgL: 0.2, nitriteManagementMgL: 0.3 },
+    calculateNH3: calculateNH3,
+    feedingTemperatureFactor: feedingTemperatureFactor,
+    feedingTemperatureInfo: feedingTemperatureInfo,
+    temperatureTable: TEMPERATURE_TABLE,
+    classifyWater: classifyWater,
+    feedProfiles: FEED_PROFILES,
+    feedProfile: feedProfile,
+    harvestProjection: harvestProjection,
+    localIsoDate: localIso
+  };
 })();
 
 ;
@@ -10151,47 +10285,18 @@
     return fallback;
   }
 
-  function toNumber(value) {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value)
-        ? value
-        : 0;
-    }
-
-    var text = String(value)
-      .trim()
-      .replace(/\s/g, "");
-
-    if (
-      text.indexOf(",") >= 0 &&
-      text.indexOf(".") >= 0
-    ) {
-      text = text
-        .replace(/\./g, "")
-        .replace(",", ".");
-    } else if (
-      text.indexOf(",") >= 0
-    ) {
-      text = text.replace(",", ".");
-    } else if (
-      /^\d{1,3}(\.\d{3})+$/.test(text)
-    ) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number)
-      ? number
-      : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function toNonNegativeNumber(value) {
@@ -13224,28 +13329,18 @@
     return fallback;
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(value, decimals) {
@@ -13660,6 +13755,11 @@
         "production_targetWeightG"
       ], 0)),
 
+      plannedCycleDays: toNumber(firstValue(input, [
+        "plannedCycleDays",
+        "production_plannedCycleDays"
+      ], 0)),
+
       notes: normalizeText(firstValue(input, [
         "notes",
         "observations",
@@ -13782,6 +13882,7 @@
     var quantity = Math.floor(toNumber(input.quantity));
     var averageWeightG = toNumber(input.averageWeightG);
     var targetWeightG = toNumber(input.targetWeightG);
+    var plannedCycleDays = Math.round(toNumber(input.plannedCycleDays));
 
     var pondVolumeM3 = getPondVolumeM3(pond);
     var pondMaxDensityKgM3 = getPondMaxDensityKgM3(pond);
@@ -13814,6 +13915,7 @@
       quantity: quantity,
       averageWeightG: round(averageWeightG, 2),
       targetWeightG: round(targetWeightG, 2),
+      plannedCycleDays: plannedCycleDays > 0 ? plannedCycleDays : null,
 
       initialBiomassKg: round(initialBiomassKg, 2),
       densityKgM3: round(densityKgM3, 4),
@@ -14433,6 +14535,7 @@
 
       capacityUsePercent: metrics.capacityUsePercent,
       targetWeightG: metrics.targetWeightG,
+      plannedCycleDays: metrics.plannedCycleDays,
 
       technicalStatus: metrics.technicalStatus,
       technicalSeverity: metrics.technicalSeverity,
@@ -14474,6 +14577,7 @@
 
       capacityUsePercent: metrics.capacityUsePercent,
       targetWeightG: metrics.targetWeightG,
+      plannedCycleDays: metrics.plannedCycleDays,
 
       technicalStatus: metrics.technicalStatus,
       technicalSeverity: metrics.technicalSeverity,
@@ -14629,6 +14733,7 @@
 
       capacityUsePercent: metrics.capacityUsePercent,
       targetWeightG: metrics.targetWeightG,
+      plannedCycleDays: metrics.plannedCycleDays,
 
       technicalStatus: metrics.technicalStatus,
       technicalSeverity: metrics.technicalSeverity,
@@ -14667,6 +14772,7 @@
 
       capacityUsePercent: metrics.capacityUsePercent,
       targetWeightG: metrics.targetWeightG,
+      plannedCycleDays: metrics.plannedCycleDays,
 
       technicalStatus: metrics.technicalStatus,
       technicalSeverity: metrics.technicalSeverity,
@@ -14756,6 +14862,7 @@
       quantity: firstValue(cycle, ["quantityInitial", "currentQuantity"], firstValue(stocking, ["quantity"], "")),
       averageWeightG: firstValue(cycle, ["initialAverageWeightG", "currentAverageWeightG"], firstValue(stocking, ["averageWeightG"], "")),
       targetWeightG: firstValue(cycle, ["targetWeightG"], firstValue(stocking, ["targetWeightG"], "")),
+      plannedCycleDays: firstValue(cycle, ["plannedCycleDays"], firstValue(stocking, ["plannedCycleDays"], "")),
 
       notes: firstValue(stocking, ["notes"], firstValue(cycle, ["notes"], ""))
     };
@@ -15728,6 +15835,8 @@
             ).value
           : "",
 
+      plannedCycleDays: getElement("production_plannedCycleDays") ? getElement("production_plannedCycleDays").value : "",
+
       notes:
         getElement(
           "production_notes"
@@ -15941,6 +16050,8 @@
       "production_targetWeightG",
       ""
     );
+
+    setValue("production_plannedCycleDays", "");
 
     setValue(
       "production_notes",
@@ -16817,6 +16928,8 @@
         model.targetWeightG || ""
       );
 
+      setValue("production_plannedCycleDays", model.plannedCycleDays || "");
+
       setValue(
         "production_notes",
         model.notes || ""
@@ -17372,6 +17485,309 @@
 })();
 ;
 
+/* ===== js/services/movimentacao-service.js ===== */
+/*
+  AquaGest Pro — movimentação de peixes por lote (avaliação técnica, item 8).
+  Usa a store "mortality_records" (já existente no banco, no backup e no isolamento).
+
+  Tipos: mortalidade, despesca_parcial, transferencia_saida, transferencia_entrada.
+  População em uma data = inicial + entradas − todas as saídas até a data.
+*/
+(function () {
+  "use strict";
+
+  var STORE = "mortality_records";
+  var EVENT = "aquagest:fish-movement-changed";
+  var TYPES = {
+    mortalidade: { label: "Mortalidade", direction: -1 },
+    despesca_parcial: { label: "Despesca parcial", direction: -1 },
+    transferencia_saida: { label: "Transferência (saída)", direction: -1 },
+    transferencia_entrada: { label: "Transferência (entrada)", direction: 1 }
+  };
+
+  function num(value) {
+    if (window.AquaGestNumber) return window.AquaGestNumber.parse(value);
+    var n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function text(value) { return String(value === null || value === undefined ? "" : value).trim(); }
+  function isActive(record) {
+    var status = String(record && record.status || "").toLowerCase();
+    return !!record && record.deleted !== true && status !== "voided" && status !== "deleted";
+  }
+  function normalizeType(value) {
+    var t = text(value).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[\s-]+/g, "_");
+    if (TYPES[t]) return t;
+    if (t === "mortality" || t === "morte" || t === "mortos") return "mortalidade";
+    if (t === "despesca" || t === "harvest") return "despesca_parcial";
+    if (t === "transferencia") return "transferencia_saida";
+    return "mortalidade";
+  }
+  function cycleOf(record) { return record.cycleId || record.productionCycleId || ""; }
+  function localToday() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  /* Biomassa do movimento: informada, ou quantidade × peso médio. */
+  function biomassOf(record) {
+    var biomass = num(record.biomassKg);
+    if (biomass > 0) return biomass;
+    var weight = num(record.averageWeightG);
+    return weight > 0 ? num(record.quantity) * weight / 1000 : 0;
+  }
+
+  /*
+    Soma os movimentos de um lote num intervalo de datas (fromExclusive, toInclusive].
+    Datas vazias = sem limite.
+  */
+  function summarize(movements, cycleId, fromExclusive, toInclusive) {
+    var out = { deaths: 0, harvested: 0, transferredOut: 0, transferredIn: 0, harvestedBiomassKg: 0, transferredOutBiomassKg: 0, transferredInBiomassKg: 0, deadBiomassKg: 0 };
+    (movements || []).forEach(function (m) {
+      if (!isActive(m) || (cycleId && cycleOf(m) !== cycleId)) return;
+      var date = text(m.date).slice(0, 10);
+      if (fromExclusive && date <= fromExclusive) return;
+      if (toInclusive && date > toInclusive) return;
+      var qty = Math.max(0, Math.round(num(m.quantity)));
+      var type = normalizeType(m.movementType || m.type);
+      var biomass = biomassOf(m);
+      if (type === "mortalidade") { out.deaths += qty; out.deadBiomassKg += biomass; }
+      else if (type === "despesca_parcial") { out.harvested += qty; out.harvestedBiomassKg += biomass; }
+      else if (type === "transferencia_saida") { out.transferredOut += qty; out.transferredOutBiomassKg += biomass; }
+      else if (type === "transferencia_entrada") { out.transferredIn += qty; out.transferredInBiomassKg += biomass; }
+    });
+    out.totalOut = out.deaths + out.harvested + out.transferredOut;
+    out.net = out.transferredIn - out.totalOut;
+    return out;
+  }
+
+  /* População = inicial + entradas − saídas (mortalidade da biometria é somada à parte por quem chama). */
+  function populationAt(initialQuantity, movements, cycleId, date) {
+    var s = summarize(movements, cycleId, "", date);
+    return Math.max(0, Math.round(num(initialQuantity)) + s.transferredIn - s.totalOut);
+  }
+
+  /* Sobrevivência (%) = (atuais + despescados + transferidos) ÷ (iniciais + recebidos) × 100. */
+  function survivalPercent(initialQuantity, currentQuantity, summary) {
+    var s = summary || summarize([], "");
+    var base = num(initialQuantity) + s.transferredIn;
+    if (base <= 0) return 0;
+    return (num(currentQuantity) + s.harvested + s.transferredOut) / base * 100;
+  }
+
+  function requireDb() {
+    if (!window.database) throw new Error("Banco local não carregado.");
+  }
+  function currentPropertyId() {
+    if (window.AuthService && typeof window.AuthService.getCurrentPropertyId === "function") return window.AuthService.getCurrentPropertyId();
+    return null;
+  }
+  function currentUserId() {
+    try { return window.AuthService && window.AuthService.getCurrentUser ? (window.AuthService.getCurrentUser() || {}).id || null : null; } catch (e) { return null; }
+  }
+  function newId() {
+    if (window.AquaGestId && typeof window.AquaGestId.generateId === "function") return window.AquaGestId.generateId("fishmov");
+    return "fishmov_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 9);
+  }
+  function dispatch(detail) {
+    if (typeof window.CustomEvent === "function" && window.dispatchEvent) window.dispatchEvent(new window.CustomEvent(EVENT, { detail: detail || {} }));
+  }
+
+  async function list(cycleId) {
+    requireDb();
+    var propertyId = currentPropertyId();
+    var all = await window.database.getAll(STORE);
+    return (all || []).filter(function (m) {
+      return isActive(m) && (!propertyId || m.propertyId === propertyId) && (!cycleId || cycleOf(m) === cycleId);
+    }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)); });
+  }
+
+  async function recalcCycle(cycleId) {
+    if (!cycleId || !window.BiometriaService || typeof window.BiometriaService.rebuildCycleState !== "function") return;
+    try {
+      var history = await window.BiometriaService.listBiometriesByCycle(cycleId);
+      if (history && history.length) await window.BiometriaService.rebuildCycleState(cycleId, currentUserId());
+    } catch (error) {
+      console.warn("[AquaGest Pro] Recalculo do lote após movimentação não concluído:", error);
+    }
+  }
+
+  async function create(input) {
+    requireDb();
+    var data = input || {};
+    var propertyId = currentPropertyId();
+    var cycleId = text(data.cycleId);
+    var date = text(data.date) || localToday();
+    var quantity = Math.round(num(data.quantity));
+    if (!propertyId) throw new Error("Cadastre a piscicultura antes de registrar movimentações.");
+    if (!cycleId) throw new Error("Selecione o lote.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("Informe uma data válida.");
+    if (!(quantity > 0)) throw new Error("Informe a quantidade de peixes.");
+    var now = new Date().toISOString();
+    var record = {
+      id: newId(), propertyId: propertyId, cycleId: cycleId, productionCycleId: cycleId,
+      pondId: text(data.pondId) || null, date: date,
+      movementType: normalizeType(data.movementType), quantity: quantity,
+      averageWeightG: num(data.averageWeightG) > 0 ? num(data.averageWeightG) : null,
+      biomassKg: num(data.biomassKg) > 0 ? num(data.biomassKg) : null,
+      source: text(data.source) || "manual", sourceId: text(data.sourceId) || null,
+      notes: text(data.notes), status: "active", deleted: false,
+      createdBy: currentUserId(), createdAt: now, updatedAt: now
+    };
+    await window.database.add(STORE, record);
+    await recalcCycle(cycleId);
+    dispatch({ record: record });
+    return record;
+  }
+
+  async function voidMovement(id) {
+    requireDb();
+    var record = await window.database.get(STORE, id);
+    if (!record) throw new Error("Movimentação não encontrada.");
+    record.status = "voided";
+    record.deleted = true;
+    record.updatedAt = new Date().toISOString();
+    await window.database.put(STORE, record);
+    await recalcCycle(cycleOf(record));
+    dispatch({ record: record, voided: true });
+    return record;
+  }
+
+  window.FishMovementService = {
+    STORE: STORE, EVENT: EVENT, TYPES: TYPES,
+    normalizeType: normalizeType, biomassOf: biomassOf,
+    summarize: summarize, populationAt: populationAt, survivalPercent: survivalPercent,
+    list: list, create: create, voidMovement: voidMovement
+  };
+  if (typeof module !== "undefined") module.exports = window.FishMovementService;
+})();
+
+;
+
+/* ===== js/ui/movimentacao-ui.js ===== */
+/* AquaGest Pro — tela de movimentação de peixes (despesca parcial, transferências, mortalidade). */
+(function () {
+  "use strict";
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function get(id) { return document.getElementById(id); }
+  function today() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function fmt(n, d) { return Number(n || 0).toLocaleString("pt-BR", { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); }
+  function brDate(iso) { var p = String(iso || "").slice(0, 10).split("-"); return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso; }
+  function msg(text, ok) { var el = get("mov_msg"); if (el) { el.textContent = text; el.style.color = ok ? "" : "#a32d2d"; } }
+
+  async function listLots() {
+    if (window.BiometriaService && typeof window.BiometriaService.listActiveLotsForBiometry === "function") {
+      try { return await window.BiometriaService.listActiveLotsForBiometry(); } catch (e) { return []; }
+    }
+    return [];
+  }
+
+  function buildCard() {
+    var screen = get("screen-producao");
+    if (!screen || get("mov_card")) return !!get("mov_card");
+    var types = window.FishMovementService ? window.FishMovementService.TYPES : {};
+    var card = document.createElement("section");
+    card.id = "mov_card";
+    card.className = "page-card";
+    card.innerHTML =
+      "<h3>Movimentação de peixes</h3>" +
+      "<p class='technical-note'>Registre despesca parcial, transferências e mortalidade fora da biometria. A população, a sobrevivência e a conversão alimentar do lote são recalculadas automaticamente.</p>" +
+      "<form id='mov_form' class='form'><div class='form-grid'>" +
+      "<div class='form-group'><label for='mov_cycleId'>Lote</label><select id='mov_cycleId' required></select></div>" +
+      "<div class='form-group'><label for='mov_date'>Data</label><input id='mov_date' type='date' required></div>" +
+      "<div class='form-group'><label for='mov_type'>Tipo</label><select id='mov_type'>" +
+      Object.keys(types).map(function (k) { return "<option value='" + k + "'>" + esc(types[k].label) + "</option>"; }).join("") +
+      "</select></div>" +
+      "<div class='form-group'><label for='mov_quantity'>Quantidade de peixes</label><input id='mov_quantity' type='text' inputmode='numeric' required></div>" +
+      "<div class='form-group'><label for='mov_weight'>Peso médio (g)</label><input id='mov_weight' type='text' inputmode='decimal' placeholder='Necessário para despesca e transferência'></div>" +
+      "<div class='form-group'><label for='mov_notes'>Observações</label><input id='mov_notes' type='text'></div>" +
+      "</div><div class='form-actions'><button type='submit' class='btn btn-primary'>Registrar movimentação</button> <span id='mov_msg'></span></div></form>" +
+      "<div id='mov_list' style='overflow-x:auto'></div>";
+    screen.appendChild(card);
+    get("mov_date").value = today();
+    get("mov_form").addEventListener("submit", submit);
+    get("mov_cycleId").addEventListener("change", renderList);
+    return true;
+  }
+
+  async function fillLots() {
+    var select = get("mov_cycleId");
+    if (!select) return;
+    var current = select.value;
+    var lots = await listLots();
+    select.innerHTML = lots.length
+      ? lots.map(function (l) { return "<option value='" + esc(l.cycleId) + "' data-pond='" + esc(l.pondId) + "'>" + esc(l.label || l.pondName) + "</option>"; }).join("")
+      : "<option value=''>Nenhum lote ativo</option>";
+    if (current) select.value = current;
+  }
+
+  async function renderList() {
+    var box = get("mov_list");
+    var select = get("mov_cycleId");
+    if (!box || !select || !window.FishMovementService) return;
+    if (!select.value) { box.innerHTML = ""; return; }
+    var items = await window.FishMovementService.list(select.value);
+    var types = window.FishMovementService.TYPES;
+    if (!items.length) { box.innerHTML = "<p class='technical-note'>Nenhuma movimentação registrada para este lote.</p>"; return; }
+    box.innerHTML = "<table><thead><tr><th>Data</th><th>Tipo</th><th>Peixes</th><th>Peso médio</th><th>Biomassa</th><th>Origem</th><th></th></tr></thead><tbody>" +
+      items.map(function (m) {
+        var t = types[window.FishMovementService.normalizeType(m.movementType)] || { label: m.movementType };
+        return "<tr><td>" + esc(brDate(m.date)) + "</td><td>" + esc(t.label) + "</td><td>" + fmt(m.quantity) + "</td><td>" +
+          (m.averageWeightG ? fmt(m.averageWeightG, 1) + " g" : "—") + "</td><td>" + fmt(window.FishMovementService.biomassOf(m), 2) + " kg</td><td>" +
+          esc(m.source === "sanidade" ? "Sanidade" : "Manual") + "</td><td><button type='button' class='btn btn-small' data-mov-del='" + esc(m.id) + "'>Excluir</button></td></tr>";
+      }).join("") + "</tbody></table>";
+    Array.prototype.forEach.call(box.querySelectorAll("[data-mov-del]"), function (button) {
+      button.addEventListener("click", async function () {
+        if (!window.confirm("Excluir esta movimentação? O lote será recalculado.")) return;
+        try { await window.FishMovementService.voidMovement(button.getAttribute("data-mov-del")); msg("Movimentação excluída e lote recalculado.", true); renderList(); }
+        catch (error) { msg(error.message || "Não foi possível excluir."); }
+      });
+    });
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    var select = get("mov_cycleId");
+    var option = select && select.options[select.selectedIndex];
+    var type = get("mov_type").value;
+    var weight = get("mov_weight").value;
+    if ((type === "despesca_parcial" || type === "transferencia_saida" || type === "transferencia_entrada") && !(window.AquaGestNumber ? window.AquaGestNumber.parse(weight) > 0 : Number(weight) > 0)) {
+      msg("Informe o peso médio: ele é necessário para descontar a biomassa retirada no cálculo da conversão alimentar.");
+      return;
+    }
+    try {
+      msg("Salvando e recalculando o lote…", true);
+      await window.FishMovementService.create({
+        cycleId: select.value, pondId: option ? option.getAttribute("data-pond") : "",
+        date: get("mov_date").value, movementType: type,
+        quantity: get("mov_quantity").value, averageWeightG: weight, notes: get("mov_notes").value
+      });
+      get("mov_quantity").value = ""; get("mov_weight").value = ""; get("mov_notes").value = "";
+      msg("Movimentação registrada. População e indicadores do lote atualizados.", true);
+      renderList();
+    } catch (error) {
+      msg(error.message || "Não foi possível registrar a movimentação.");
+    }
+  }
+
+  async function refresh() {
+    if (!buildCard()) return;
+    await fillLots();
+    await renderList();
+  }
+
+  document.addEventListener("click", function (event) {
+    if (event.target && event.target.closest && event.target.closest('[data-screen="producao"]')) setTimeout(refresh, 300);
+  });
+  window.addEventListener("aquagest:production-changed", function () { setTimeout(refresh, 300); });
+  if (window.FishMovementService) window.addEventListener(window.FishMovementService.EVENT, function () { setTimeout(renderList, 100); });
+
+  window.MovimentacaoUI = { refresh: refresh };
+})();
+
+;
+
 /* ===== js/services/biometria-service.js ===== */
 /*
   AquaGest Lite
@@ -17477,28 +17893,18 @@
     );
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function toInteger(value) {
@@ -17728,6 +18134,15 @@
   function normalizeBiometryInput(data) {
     var input = data || {};
 
+    /*
+      Idempotente: uma entrada já normalizada não é normalizada de novo.
+      Antes, a segunda passagem lia usedFeedingPercent = 0 como "digitado pelo operador"
+      e a ração recomendada saía zerada quando o campo de % ficava vazio.
+    */
+    if (input.__biometryNormalized === true) {
+      return input;
+    }
+
     var usedPercentKeys = [
       "usedFeedingPercent",
       "biometria_usedFeedingPercent"
@@ -17745,6 +18160,7 @@
     ], null);
 
     return {
+      __biometryNormalized: true,
       id: normalizeText(firstValue(input, [
         "id",
         "biometryId",
@@ -17820,7 +18236,10 @@
       ], 0)),
 
       usedFeedingPercent: toNumber(firstValue(input, usedPercentKeys, 0)),
-      hasUsedFeedingPercent: hasValue(input, usedPercentKeys),
+      /* Registro salvo traz a marcação explícita; registro antigo só conta como digitado se o % for maior que zero. */
+      hasUsedFeedingPercent: typeof input.feedingPercentManual === "boolean"
+        ? input.feedingPercentManual
+        : hasValue(input, usedPercentKeys) && toNumber(firstValue(input, usedPercentKeys, 0)) > 0,
 
       mealsPerDay: toInteger(firstValue(input, [
         "mealsPerDay",
@@ -17900,69 +18319,16 @@
     return FEEDING_PERCENT_TABLE[FEEDING_PERCENT_TABLE.length - 1];
   }
 
+  /* Tabela única de temperatura: TechnicalEngine.feedingTemperatureInfo. */
   function getTemperatureFeedingFactor(temperatureC) {
-    var temperature = toNumber(temperatureC);
-
-    if (temperature <= 0) {
-      return {
-        factor: 1,
-        label: "Temperatura não informada",
-        message: "Percentual sugerido sem ajuste por temperatura."
-      };
-    }
-
-    if (temperature < 18) {
-      return {
-        factor: 0,
-        label: "Arraçoamento suspenso",
-        message: "Temperatura abaixo de 18 °C. Recomenda-se suspender ou revisar o fornecimento de ração."
-      };
-    }
-
-    if (temperature < 20) {
-      return {
-        factor: 0.2,
-        label: "Consumo muito reduzido",
-        message: "Temperatura baixa. Usar aproximadamente 20% da recomendação base."
-      };
-    }
-
-    if (temperature < 22) {
-      return {
-        factor: 0.4,
-        label: "Consumo reduzido",
-        message: "Temperatura abaixo do ideal. Usar aproximadamente 40% da recomendação base."
-      };
-    }
-
-    if (temperature < 24) {
-      return {
-        factor: 0.6,
-        label: "Consumo moderado",
-        message: "Temperatura em transição. Usar aproximadamente 60% da recomendação base."
-      };
-    }
-
-    if (temperature <= 30) {
-      return {
-        factor: 1,
-        label: "Faixa adequada",
-        message: "Temperatura favorável para alimentação da tilápia."
-      };
-    }
-
-    if (temperature <= 31) {
-      return {
-        factor: 0.6,
-        label: "Atenção por temperatura elevada",
-        message: "Temperatura elevada. Usar aproximadamente 60% da recomendação base e observar oxigênio dissolvido."
-      };
+    if (window.TechnicalEngine && typeof window.TechnicalEngine.feedingTemperatureInfo === "function") {
+      return window.TechnicalEngine.feedingTemperatureInfo(temperatureC);
     }
 
     return {
-      factor: 0,
-      label: "Arraçoamento suspenso",
-      message: "Temperatura acima de 31 °C. Recomenda-se suspender ou revisar a alimentação e monitorar oxigênio dissolvido."
+      factor: 1,
+      label: "Temperatura não ajustada",
+      message: "Motor técnico indisponível; percentual sem ajuste por temperatura."
     };
   }
 
@@ -18315,7 +18681,8 @@
       densityFishM3: round(densityFishM3, 4),
       capacityUsePercent: round(capacityUsePercent, 2),
 
-      feedTotalKg: toNumber(cycle.feedTotalKg || pond.feedTotalKg || 0),
+      /* Ração acumulada começa em zero: o total do lote é resultado do recálculo, nunca entrada dele. */
+      feedTotalKg: 0,
 
       initialPopulation: initialQuantity,
       initialAverageWeightG: round(initialAverageWeightG, 2),
@@ -18353,7 +18720,21 @@
       mortality = previousPopulation;
     }
 
-    var currentPopulation = Math.max(0, previousPopulation - mortality);
+    /*
+      Movimentações do lote (mortalidade de Sanidade, despesca parcial, transferências)
+      no período desde a biometria anterior (item 8 da avaliação técnica).
+    */
+    var movementCycleId = (ctx.cycle && ctx.cycle.id) || baseState.cycleId || "";
+    var movementService = window.FishMovementService;
+    var movementFrom = previousState.date || baseState.date || "";
+    var periodMovements = movementService
+      ? movementService.summarize(ctx.movements || [], movementCycleId, movementFrom, input.date)
+      : { totalOut: 0, transferredIn: 0, harvestedBiomassKg: 0, transferredOutBiomassKg: 0, transferredInBiomassKg: 0, harvested: 0, transferredOut: 0, deaths: 0 };
+    var cumulativeMovements = movementService
+      ? movementService.summarize(ctx.movements || [], movementCycleId, "", input.date)
+      : periodMovements;
+
+    var currentPopulation = Math.max(0, previousPopulation - mortality - periodMovements.totalOut + periodMovements.transferredIn);
     var currentBiomassKg = currentPopulation > 0 && averageWeightG > 0
       ? currentPopulation * averageWeightG / 1000
       : 0;
@@ -18381,8 +18762,15 @@
     var previousBiomassKg = toNumber(previousState.biomassKg || baseState.biomassKg || 0);
     var initialBiomassKg = toNumber(baseState.initialBiomassKg || baseState.biomassKg || 0);
 
-    var biomassGainPeriodKg = currentBiomassKg - previousBiomassKg;
-    var biomassGainTotalKg = currentBiomassKg - initialBiomassKg;
+    /* Ganho = B_atual + B_despescada + B_transferida − B_inicial − B_recebida. */
+    var biomassGainPeriodKg = currentBiomassKg + periodMovements.harvestedBiomassKg + periodMovements.transferredOutBiomassKg
+      - previousBiomassKg - periodMovements.transferredInBiomassKg;
+    var biomassGainTotalKg = currentBiomassKg + cumulativeMovements.harvestedBiomassKg + cumulativeMovements.transferredOutBiomassKg
+      - initialBiomassKg - cumulativeMovements.transferredInBiomassKg;
+    var initialPopulationForSurvival = toInteger(baseState.initialPopulation || baseState.population || 0);
+    var survivalPercent = movementService
+      ? movementService.survivalPercent(initialPopulationForSurvival, currentPopulation, cumulativeMovements)
+      : (initialPopulationForSurvival > 0 ? currentPopulation / initialPopulationForSurvival * 100 : 0);
 
     var automaticFeedPeriodKg = toNumber(ctx.automaticFeedPeriodKg);
     var feedPeriodKg = round(
@@ -18415,6 +18803,16 @@
       ? currentBiomassKg * usedFeedingPercent / 100
       : 0;
 
+    /*
+      Percentual-base (sem temperatura) para o arraçoamento aplicar a temperatura UMA vez.
+      Se o operador digitou o percentual, a decisão sobre temperatura já foi dele.
+    */
+    var feedingPercentManual = !!input.hasUsedFeedingPercent;
+    var feedingDosePercent = feedingPercentManual ? usedFeedingPercent : feedingSuggestion.basePercent;
+    var recommendedFeedDayBaseKg = currentBiomassKg > 0 && feedingDosePercent > 0
+      ? currentBiomassKg * feedingDosePercent / 100
+      : 0;
+
     var recommendedFeedMealKg = input.mealsPerDay > 0 && recommendedFeedDayKg > 0
       ? recommendedFeedDayKg / input.mealsPerDay
       : 0;
@@ -18435,6 +18833,14 @@
       previousBiomassKg: round(previousBiomassKg, 2),
 
       mortality: mortality,
+      movementDeathsPeriod: periodMovements.deaths,
+      movementOutPeriod: periodMovements.totalOut,
+      movementInPeriod: periodMovements.transferredIn,
+      harvestedTotal: cumulativeMovements.harvested,
+      harvestedBiomassTotalKg: round(cumulativeMovements.harvestedBiomassKg, 2),
+      transferredOutTotal: cumulativeMovements.transferredOut,
+      transferredInTotal: cumulativeMovements.transferredIn,
+      survivalPercent: round(survivalPercent, 2),
       currentPopulation: currentPopulation,
       currentBiomassKg: round(currentBiomassKg, 2),
 
@@ -18464,6 +18870,9 @@
       feedingTemperatureFactor: feedingSuggestion.temperatureFactor,
       suggestedFeedingPercent: feedingSuggestion.suggestedPercent,
       usedFeedingPercent: round(usedFeedingPercent, 2),
+      feedingPercentManual: feedingPercentManual,
+      feedingDosePercent: round(feedingDosePercent, 2),
+      recommendedFeedDayBaseKg: round(recommendedFeedDayBaseKg, 3),
       recommendedFeedDayKg: round(recommendedFeedDayKg, 3),
       mealsPerDay: input.mealsPerDay,
       recommendedFeedMealKg: round(recommendedFeedMealKg, 3),
@@ -18478,7 +18887,8 @@
         input.date,
         averageWeightG,
         targetWeightG,
-        gpdGDay
+        gpdGDay,
+        ctx.cycle && ctx.cycle.plannedCycleDays
       );
       Object.keys(harvest).forEach(function (key) { metrics[key] = harvest[key]; });
     }
@@ -18525,6 +18935,9 @@
       suggestedFeedingPercent: metrics.suggestedFeedingPercent,
       usedFeedingPercent: metrics.usedFeedingPercent,
       recommendedFeedDayKg: metrics.recommendedFeedDayKg,
+      recommendedFeedDayBaseKg: metrics.recommendedFeedDayBaseKg,
+      feedingPercentManual: metrics.feedingPercentManual,
+      feedingDosePercent: metrics.feedingDosePercent,
       mealsPerDay: metrics.mealsPerDay,
       recommendedFeedMealKg: metrics.recommendedFeedMealKg,
 
@@ -18917,6 +19330,9 @@
       suggestedFeedingPercent: toNumber(record.suggestedFeedingPercent),
       usedFeedingPercent: toNumber(record.usedFeedingPercent),
       recommendedFeedDayKg: toNumber(record.recommendedFeedDayKg),
+      recommendedFeedDayBaseKg: toNumber(record.recommendedFeedDayBaseKg),
+      feedingPercentManual: record.feedingPercentManual === true,
+      feedingDosePercent: toNumber(record.feedingDosePercent),
       mealsPerDay: toInteger(record.mealsPerDay),
       recommendedFeedMealKg: toNumber(record.recommendedFeedMealKg),
 
@@ -19019,6 +19435,7 @@
       currentState: currentState,
       previousState: previousState,
       history: history,
+      movements: await loadFishMovements(entry.cycle.id),
       automaticFeedPeriodKg: round(automaticFeedPeriodKg, 2)
     };
   }
@@ -19150,6 +19567,13 @@
       previousBiomassKg: metrics.previousBiomassKg,
 
       mortality: metrics.mortality,
+      movementOutPeriod: metrics.movementOutPeriod,
+      movementInPeriod: metrics.movementInPeriod,
+      harvestedTotal: metrics.harvestedTotal,
+      harvestedBiomassTotalKg: metrics.harvestedBiomassTotalKg,
+      transferredOutTotal: metrics.transferredOutTotal,
+      transferredInTotal: metrics.transferredInTotal,
+      survivalPercent: metrics.survivalPercent,
       currentPopulation: metrics.currentPopulation,
       currentBiomassKg: metrics.currentBiomassKg,
 
@@ -19180,6 +19604,9 @@
       suggestedFeedingPercent: metrics.suggestedFeedingPercent,
       usedFeedingPercent: metrics.usedFeedingPercent,
       recommendedFeedDayKg: metrics.recommendedFeedDayKg,
+      recommendedFeedDayBaseKg: metrics.recommendedFeedDayBaseKg,
+      feedingPercentManual: metrics.feedingPercentManual,
+      feedingDosePercent: metrics.feedingDosePercent,
       mealsPerDay: metrics.mealsPerDay,
       recommendedFeedMealKg: metrics.recommendedFeedMealKg,
 
@@ -19346,6 +19773,18 @@
     });
   }
 
+  async function loadFishMovements(cycleId) {
+    try {
+      var all = await dbGetAll("mortality_records");
+      return (all || []).filter(function (m) {
+        var status = normalizeSearch(m && m.status);
+        return m && m.deleted !== true && status !== "voided" && (m.cycleId === cycleId || m.productionCycleId === cycleId);
+      });
+    } catch (error) {
+      return [];
+    }
+  }
+
   async function rebuildCycleState(cycleId, userId) {
     ensureDependencies();
 
@@ -19361,6 +19800,7 @@
     var baseState = buildBaseState(entry);
     var history = await listBiometriesByCycle(entry.cycle.id);
     var state = Object.assign({}, baseState);
+    var movements = await loadFishMovements(entry.cycle.id);
     var updatedRecords = [];
 
     for (var i = 0; i < history.length; i += 1) {
@@ -19378,7 +19818,8 @@
         baseState: baseState,
         previousState: state,
         currentState: state,
-        history: history
+        history: history,
+        movements: movements
       };
 
       var metrics = calculateBiometryMetrics(input, context);
@@ -19708,7 +20149,21 @@
     return "Não informado";
   }
 
+  /* Recalcula todos os lotes ativos da propriedade atual (correção de ração acumulada). */
+  async function rebuildAllActiveCycles(userId) {
+    var lots = await listActiveLotsForBiometry();
+    var done = 0;
+    for (var i = 0; i < lots.length; i += 1) {
+      var history = await listBiometriesByCycle(lots[i].cycleId);
+      if (!history.length) continue;
+      await rebuildCycleState(lots[i].cycleId, userId);
+      done += 1;
+    }
+    return done;
+  }
+
   window.BiometriaService = {
+    rebuildAllActiveCycles: rebuildAllActiveCycles,
     listActiveLotsForBiometry: listActiveLotsForBiometry,
 
     getBiometryById: getBiometryById,
@@ -19826,28 +20281,18 @@
       .replace(/'/g, "&#039;");
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function toInteger(value) {
@@ -21517,24 +21962,18 @@
    * @param {any} value
    * @returns {number}
    */
-  function normalizeNumber(value) {
-    var text = String(value === null || value === undefined ? "" : value)
-      .replace(/[^\d,.-]/g, "")
-      .trim();
-
-    if (!text) {
-      return 0;
-    }
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function normalizeNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(String(value === null || value === undefined ? "" : value).replace(/[^\d,.-]/g, ""), fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).replace(/[^\d,.-]/g, "").trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   /**
@@ -22077,49 +22516,18 @@
     return fallback;
   }
 
-  function toNumber(value) {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      return 0;
-    }
-
-    if (
-      typeof value === "number"
-    ) {
-      return Number.isFinite(value)
-        ? value
-        : 0;
-    }
-
-    var text =
-      String(value)
-        .trim()
-        .replace(/\s/g, "");
-
-    if (
-      text.indexOf(",") >= 0 &&
-      text.indexOf(".") >= 0
-    ) {
-      text =
-        text
-          .replace(/\./g, "")
-          .replace(",", ".");
-    } else if (
-      text.indexOf(",") >= 0
-    ) {
-      text =
-        text.replace(",", ".");
-    }
-
-    var number =
-      Number(text);
-
-    return Number.isFinite(number)
-      ? number
-      : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function formatNumber(
@@ -26154,14 +26562,18 @@
 
   var VERSION = "tgc-ml-v1";
 
-  function number(value) {
-    if (value === null || value === undefined || value === "") return 0;
-    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-    var text = String(value).trim().replace(/\s/g, "");
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) text = text.replace(/\./g, "").replace(",", ".");
-    else if (text.indexOf(",") >= 0) text = text.replace(",", ".");
+  function number(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
     var parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function positive(value, label) {
@@ -26224,9 +26636,25 @@
     return round(number(weightG) * number(population) / 1000, 3);
   }
 
-  function calculateFromBiometries(records) {
-    var usable = (records || []).filter(function (record) {
-      return record && number(record.averageWeightG || record.averageWeight) > 0;
+  function isActiveRecord(record) {
+    var status = String(record && record.status || "").toLowerCase();
+    return !!record && record.deleted !== true && status !== "voided" && status !== "cancelado" && status !== "deleted";
+  }
+
+  function recordCycleId(record) {
+    return record.cycleId || record.productionCycleId || record.activeLotId || record.pondId || "sem-lote";
+  }
+
+  /* Filtra as biometrias por lote antes de pegar a primeira e a última (não mistura lotes). */
+  function calculateFromBiometries(records, cycleId) {
+    var active = (records || []).filter(isActiveRecord);
+    var targetCycle = cycleId;
+    if (!targetCycle && active.length) {
+      var latest = active.slice().sort(function (a, b) { return String(b.date || "").localeCompare(String(a.date || "")); })[0];
+      targetCycle = recordCycleId(latest);
+    }
+    var usable = active.filter(function (record) {
+      return recordCycleId(record) === targetCycle && number(record.averageWeightG || record.averageWeight) > 0;
     }).sort(function (a, b) {
       return String(a.date || "").localeCompare(String(b.date || ""));
     });
@@ -26258,6 +26686,7 @@
 
     return {
       ready: true,
+      cycleId: targetCycle,
       tgc: tgc,
       startDate: first.date,
       endDate: last.date,
@@ -26286,10 +26715,16 @@
     return round(result, 3);
   }
 
+  /*
+    Variáveis disponíveis em toda biometria. Parâmetros de água (pH, OD, amônia)
+    ficam no treinamento em Python, onde linhas sem medição são descartadas.
+  */
   var ML_FEATURES = [
-    "peso_medio_g", "biomassa_kg", "temperatura_media_c", "dias_cultivo",
-    "racao_kg", "mortalidade", "ph", "oxigenio_mg_l", "amonia_mg_l"
+    "peso_medio_g", "biomassa_kg", "temperatura_media_c", "intervalo_dias",
+    "racao_kg", "mortalidade"
   ];
+  var MIN_OBSERVATIONS_PER_FEATURE = 10;
+  var MIN_OBSERVATIONS = ML_FEATURES.length * MIN_OBSERVATIONS_PER_FEATURE;
 
   function solveLinearSystem(matrix, vector) {
     var n = vector.length;
@@ -26312,14 +26747,7 @@
     return augmented.map(function (row) { return row[n]; });
   }
 
-  function trainRidge(dataset, targetKey, options) {
-    var rows = (dataset || []).filter(function (row) {
-      return row && ML_FEATURES.every(function (feature) { return Number.isFinite(number(row[feature])); }) && Number.isFinite(number(row[targetKey]));
-    }).sort(function (a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
-    if (rows.length < 8) throw new Error("São necessárias pelo menos 8 observações para treinar o modelo local.");
-    var split = Math.max(2, Math.min(rows.length - 1, Math.floor(rows.length * 0.8)));
-    var train = rows.slice(0, split);
-    var test = rows.slice(split);
+  function fitRidge(train, targetKey, lambda) {
     var means = ML_FEATURES.map(function (feature) { return train.reduce(function (sum, row) { return sum + number(row[feature]); }, 0) / train.length; });
     var scales = ML_FEATURES.map(function (feature, index) {
       var variance = train.reduce(function (sum, row) { var delta = number(row[feature]) - means[index]; return sum + delta * delta; }, 0) / train.length;
@@ -26333,24 +26761,44 @@
       var target = number(row[targetKey]);
       values.forEach(function (left, leftIndex) { vector[leftIndex] += left * target; values.forEach(function (right, rightIndex) { matrix[leftIndex][rightIndex] += left * right; }); });
     });
-    var lambda = number(options && options.lambda) || 1;
     for (var diagonal = 1; diagonal < size; diagonal += 1) matrix[diagonal][diagonal] += lambda;
     var solved = solveLinearSystem(matrix, vector);
-    var model = { type: "ridge-standardized", features: ML_FEATURES.slice(), means: means, scales: scales, intercept: solved[0], coefficients: solved.slice(1) };
-    var actual = test.map(function (row) { return number(row[targetKey]); });
-    var predicted = test.map(function (row) { return predictWithModel(model, row); });
+    return { type: "ridge-standardized", features: ML_FEATURES.slice(), means: means, scales: scales, intercept: solved[0], coefficients: solved.slice(1) };
+  }
+
+  /* Validação cruzada temporal (origem móvel): treina no passado, testa no bloco seguinte. */
+  function trainRidge(dataset, targetKey, options) {
+    var rows = (dataset || []).filter(function (row) {
+      return row && ML_FEATURES.every(function (feature) { return Number.isFinite(number(row[feature], NaN)); }) && Number.isFinite(number(row[targetKey], NaN));
+    }).sort(function (a, b) { return String(a.date || "").localeCompare(String(b.date || "")); });
+    var minimum = number(options && options.minObservations) || MIN_OBSERVATIONS;
+    if (rows.length < minimum) {
+      throw new Error("São necessárias pelo menos " + minimum + " observações (" + MIN_OBSERVATIONS_PER_FEATURE + " por variável) para treinar o modelo local. Disponíveis: " + rows.length + ".");
+    }
+    var lambda = number(options && options.lambda) || 1;
+    var folds = Math.max(2, Math.min(5, Math.floor(rows.length / 10)));
+    var block = Math.floor(rows.length / (folds + 1));
+    var actual = [];
+    var predicted = [];
+    for (var fold = 1; fold <= folds; fold += 1) {
+      var train = rows.slice(0, block * fold);
+      var test = fold === folds ? rows.slice(block * fold) : rows.slice(block * fold, block * (fold + 1));
+      var foldModel = fitRidge(train, targetKey, lambda);
+      test.forEach(function (row) { actual.push(number(row[targetKey])); predicted.push(predictWithModel(foldModel, row)); });
+    }
+    var model = fitRidge(rows, targetKey, lambda);
     var meanTarget = actual.reduce(function (sum, value) { return sum + value; }, 0) / actual.length;
     var mae = actual.reduce(function (sum, value, index) { return sum + Math.abs(value - predicted[index]); }, 0) / actual.length;
     var mse = actual.reduce(function (sum, value, index) { var delta = value - predicted[index]; return sum + delta * delta; }, 0) / actual.length;
     var total = actual.reduce(function (sum, value) { var delta = value - meanTarget; return sum + delta * delta; }, 0);
     var residual = actual.reduce(function (sum, value, index) { var delta = value - predicted[index]; return sum + delta * delta; }, 0);
-    return { model: model, metrics: { target: targetKey, train: train.length, test: test.length, mae: round(mae, 4), rmse: round(Math.sqrt(mse), 4), r2: total > 0 ? round(1 - residual / total, 4) : null } };
+    return { model: model, metrics: { target: targetKey, observations: rows.length, folds: folds, test: actual.length, mae: round(mae, 4), rmse: round(Math.sqrt(mse), 4), r2: total > 0 ? round(1 - residual / total, 4) : null } };
   }
 
   function buildDatasetFromBiometries(records) {
     var grouped = {};
-    (records || []).forEach(function (record) {
-      var key = record.cycleId || record.pondId || "sem-lote";
+    (records || []).filter(isActiveRecord).forEach(function (record) {
+      var key = recordCycleId(record);
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(record);
     });
@@ -26360,17 +26808,17 @@
       for (var index = 0; index < ordered.length - 1; index += 1) {
         var current = ordered[index];
         var next = ordered[index + 1];
-        var days = number(current.periodDays) || daysBetween(current.date, next.date);
+        var interval = daysBetween(current.date, next.date);
         var currentWeight = number(current.averageWeightG || current.averageWeight);
         var nextWeight = number(next.averageWeightG || next.averageWeight);
-        if (!(currentWeight > 0) || !(nextWeight > 0) || !(days > 0)) continue;
+        var temperature = number(current.temperatureC);
+        /* Linhas sem temperatura medida são descartadas (ausente não vira 0). */
+        if (!(currentWeight > 0) || !(nextWeight > 0) || !(interval > 0) || !(temperature > 0)) continue;
         dataset.push({
-          date: current.date, peso_medio_g: currentWeight,
+          date: current.date, cycleId: key, peso_medio_g: currentWeight,
           biomassa_kg: number(current.currentBiomassKg || current.biomassKg),
-          temperatura_media_c: number(current.temperatureC), dias_cultivo: days,
-          racao_kg: number(current.feedPeriodKg || current.feedProvidedKg), mortalidade: number(current.mortality),
-          ph: number(current.ph), oxigenio_mg_l: number(current.oxygenMgL || current.dissolvedOxygenMgL),
-          amonia_mg_l: number(current.ammoniaMgL || current.tanMgL),
+          temperatura_media_c: temperature, intervalo_dias: interval,
+          racao_kg: number(next.feedPeriodKg), mortalidade: number(next.mortality),
           peso_futuro_g: nextWeight, biomassa_futura_kg: number(next.currentBiomassKg || next.biomassKg)
         });
       }
@@ -26398,7 +26846,8 @@
     ML_FEATURES: ML_FEATURES.slice(),
     trainRidge: trainRidge,
     buildDatasetFromBiometries: buildDatasetFromBiometries,
-    trainFromBiometries: trainFromBiometries
+    trainFromBiometries: trainFromBiometries,
+    MIN_OBSERVATIONS: MIN_OBSERVATIONS
   };
 })();
 
@@ -26426,8 +26875,9 @@
         startWeightG: value("prediction_startWeightG"), endWeightG: value("prediction_endWeightG"),
         temperatureC: value("prediction_temperatureC"), days: value("prediction_days")
       });
+      /* Projeção parte do peso final observado: é onde o TGC foi medido. */
       var projectedWeight = window.PredicaoService.projectWeight({
-        startWeightG: value("prediction_startWeightG"), tgc: tgc,
+        startWeightG: value("prediction_endWeightG"), tgc: tgc,
         temperatureC: value("prediction_temperatureC"), days: value("prediction_projectionDays")
       });
       var biomass = window.PredicaoService.projectBiomass(projectedWeight, value("prediction_population"));
@@ -26449,11 +26899,27 @@
       var result = window.PredicaoService.trainFromBiometries(records || []);
       var weight = result.weight.metrics;
       var biomass = result.biomass.metrics;
-      set("prediction_mlStatus", "Modelo Ridge local treinado com " + result.observations + " observações. Peso — MAE: " + format(weight.mae, 2) + " g; RMSE: " + format(weight.rmse, 2) + " g; R²: " + (weight.r2 === null ? "indisponível" : format(weight.r2, 3)) + ". Biomassa — MAE: " + format(biomass.mae, 2) + " kg; RMSE: " + format(biomass.rmse, 2) + " kg.");
+      set("prediction_mlStatus", "Modelo Ridge local treinado com " + result.observations + " observações e validação cruzada temporal (" + result.weight.metrics.folds + " blocos). Peso — MAE: " + format(weight.mae, 2) + " g; RMSE: " + format(weight.rmse, 2) + " g; R²: " + (weight.r2 === null ? "indisponível" : format(weight.r2, 3)) + ". Biomassa — MAE: " + format(biomass.mae, 2) + " kg; RMSE: " + format(biomass.rmse, 2) + " kg.");
     } catch (error) {
       set("prediction_mlStatus", error.message || "Não foi possível treinar o modelo local.");
       message(error.message || "Não foi possível treinar o modelo local.", "warning");
     }
+  }
+
+  async function refreshTrainAvailability() {
+    var button = get("predictionTrainBtn");
+    if (!button || !window.database || !window.PredicaoService || !window.PredicaoService.buildDatasetFromBiometries) return;
+    try {
+      var records = await window.database.getAll("biometries");
+      var propertyId = window.AuthService && typeof window.AuthService.getCurrentPropertyId === "function" ? window.AuthService.getCurrentPropertyId() : null;
+      if (propertyId) records = (records || []).filter(function (record) { return record.propertyId === propertyId; });
+      var available = window.PredicaoService.buildDatasetFromBiometries(records || []).length;
+      var needed = window.PredicaoService.MIN_OBSERVATIONS || 60;
+      button.disabled = available < needed;
+      if (available < needed) {
+        set("prediction_mlStatus", "Treino indisponível: há " + available + " observações válidas e são necessárias " + needed + " (10 por variável). Use o TGC enquanto os dados se acumulam.");
+      }
+    } catch (error) { /* mantém o botão como está */ }
   }
 
   function init() {
@@ -26463,6 +26929,10 @@
     if (form) form.addEventListener("submit", calculate);
     var trainButton = get("predictionTrainBtn");
     if (trainButton) trainButton.addEventListener("click", trainLocalModel);
+    refreshTrainAvailability();
+    document.addEventListener("click", function (event) {
+      if (event.target && event.target.closest && event.target.closest('[data-screen="previsoes"]')) setTimeout(refreshTrainAvailability, 300);
+    });
   }
 
   window.PredicaoUI = { init: init, calculate: calculate };
@@ -26480,14 +26950,18 @@
   var EXTRA_PRODUCTION_KG_PER_CV_LOW = 1000;
   var EXTRA_PRODUCTION_KG_PER_CV_HIGH = 1500;
 
-  function number(value) {
-    if (value === null || value === undefined || value === "") return 0;
-    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-    var text = String(value).trim().replace(/\s/g, "");
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) text = text.replace(/\./g, "").replace(",", ".");
-    else if (text.indexOf(",") >= 0) text = text.replace(",", ".");
+  function number(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
     var parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function positive(value, label) {
@@ -26505,7 +26979,8 @@
     var data = input || {};
     var pondAreaM2 = positive(data.pondAreaM2, "A área total do viveiro");
     var targetProductionKg = positive(data.targetProductionKg, "A produção desejada");
-    var equipmentPowerCv = positive(data.equipmentPowerCv || 1.5, "A potência unitária do aerador");
+    /* Potência 0 ou vazia é erro: não assume 1,5 CV sem avisar. */
+    var equipmentPowerCv = positive(data.equipmentPowerCv, "A potência unitária do aerador");
     var species = String(data.species || "Não informada").trim() || "Não informada";
 
     var naturalCapacityKg = pondAreaM2 * NATURAL_PRODUCTION_KG_PER_M2;
@@ -26734,11 +27209,21 @@
   }
 
   function text(value) { return String(value === null || value === undefined ? "" : value).trim(); }
-  function number(value) {
-    var parsed = Number(String(value === null || value === undefined ? "" : value).replace(",", "."));
-    return Number.isFinite(parsed) ? parsed : 0;
+  function number(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
-  function today() { return new Date().toISOString().slice(0, 10); }
+  /* Data local (toISOString usa UTC e vira o dia após as 21 h em Brasília). */
+  function today() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function user() { ensureDependencies(); return window.AuthService.requireLogin(); }
   function propertyId() {
     var currentUser = user();
@@ -26777,6 +27262,21 @@
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
     };
     var saved = await window.database.add(STORE, record);
+
+    /* Mortalidade da ocorrência entra na população do lote (movimentação automática). */
+    if (record.mortalityCount > 0 && record.cycleId && window.FishMovementService) {
+      try {
+        await window.FishMovementService.create({
+          cycleId: record.cycleId, pondId: record.pondId, date: record.date,
+          movementType: "mortalidade", quantity: record.mortalityCount,
+          source: "sanidade", sourceId: record.id,
+          notes: "Mortalidade registrada em Sanidade (" + record.occurrenceType + ")."
+        });
+      } catch (movementError) {
+        console.warn("[AquaGest Pro] Mortalidade da Sanidade não lançada no lote:", movementError);
+      }
+    }
+
     dispatch({ record: saved || record });
     return saved || record;
   }
@@ -26812,7 +27312,7 @@
   function resetForm() {
     var form = get("sanidadeForm");
     if (form) form.reset();
-    if (get("health_date")) get("health_date").value = new Date().toISOString().slice(0, 10);
+    if (get("health_date")) get("health_date").value = (function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })();
   }
   async function loadCycles() {
     var select = get("health_cycleId");
@@ -26940,28 +27440,18 @@
     return false;
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(value, decimals) {
@@ -27611,20 +28101,22 @@
     };
   }
 
+  /* Tabela única de temperatura: TechnicalEngine.feedingTemperatureFactor. */
   function getTemperatureFeedingFactor(input) {
     if (!input.hasTemperatureC) {
       return 1;
     }
 
-    var temperature = input.temperatureC;
+    if (window.TechnicalEngine && typeof window.TechnicalEngine.feedingTemperatureFactor === "function") {
+      return window.TechnicalEngine.feedingTemperatureFactor(input.temperatureC);
+    }
 
-    if (temperature < 18) return 0;
-    if (temperature < 20) return 0.2;
-    if (temperature < 22) return 0.4;
-    if (temperature < 24) return 0.6;
-    if (temperature <= 30) return 1;
-    if (temperature <= 31) return 0.6;
-
+    var t = input.temperatureC;
+    if (t < 16) return 0;
+    if (t < 20) return 0.5;
+    if (t < 25) return 0.8;
+    if (t <= 30) return 1;
+    if (t <= 32) return 0.7;
     return 0;
   }
 
@@ -27662,12 +28154,8 @@
     return factor;
   }
 
-  function buildFeedingWaterAdvice(input) {
-    var temperatureFactor = getTemperatureFeedingFactor(input);
-    var oxygenFactor = getOxygenFeedingFactor(input);
-    var chemistryFactor = getChemistryFeedingFactor(input);
-    var finalFactor = Math.min(temperatureFactor, oxygenFactor, chemistryFactor);
-
+  /* Ação e mensagem saem sempre do mesmo número (fator final). */
+  function buildAdviceFromFactor(finalFactor) {
     if (finalFactor <= 0) {
       return {
         waterFeedingFactor: 0,
@@ -27697,6 +28185,26 @@
       recommendedFeedingAction: "Manter arraçoamento previsto",
       feedingWaterMessage: "Condição de água não exige redução automática de ração."
     };
+  }
+
+  /*
+    Fator da água separado em duas partes:
+    - temperatureFactor (tabela única de temperatura)
+    - chemistryFactor (OD, pH, amônia, nitrito)
+  */
+  function buildFeedingWaterAdvice(input, extraChemistryFactor) {
+    var temperatureFactor = getTemperatureFeedingFactor(input);
+    var chemistryFactor = Math.min(
+      getOxygenFeedingFactor(input),
+      getChemistryFeedingFactor(input),
+      extraChemistryFactor === undefined ? 1 : extraChemistryFactor
+    );
+    var advice = buildAdviceFromFactor(Math.min(temperatureFactor, chemistryFactor));
+
+    advice.waterTemperatureFactor = round(temperatureFactor, 2);
+    advice.waterChemistryFactor = round(chemistryFactor, 2);
+
+    return advice;
   }
 
   function pushRecommendation(list, severity, title, message) {
@@ -27869,24 +28377,22 @@
       classifyAlkalinity(input)
     ];
 
-    var classification = buildOverallClassification(parameterResults);
-    var feedingAdvice = buildFeedingWaterAdvice(input);
+    var engineChemistryFactor = 1;
 
     if (window.TechnicalEngine && typeof window.TechnicalEngine.classifyWater === "function") {
       var waterRule = window.TechnicalEngine.classifyWater(input);
+
+      /* Nenhum parâmetro avaliado pode ser descartado: só amônia/nitrito são trocados pelos do motor (NH3 calculada). */
       parameterResults = parameterResults.filter(function (item) {
         return item.key !== "ammoniaTotalMgL" && item.key !== "nitriteMgL";
       }).concat(waterRule.parameterResults);
-      classification.technicalSeverity = waterRule.technicalSeverity;
-      classification.technicalStatus = waterRule.technicalStatus;
-      classification.technicalMessage = waterRule.technicalSeverity === "critical"
-        ? "NH3 em condição crítica: suspender alimentação."
-        : waterRule.technicalSeverity === "warning"
-          ? "Nitrito em condição de manejo: reduzir alimentação e intensificar monitoramento."
-          : classification.technicalMessage;
-      feedingAdvice.waterFeedingFactor = waterRule.waterFeedingFactor;
-      feedingAdvice.recommendedFeedingAction = waterRule.recommendedFeedingAction;
+
+      engineChemistryFactor = waterRule.chemistryFactor !== undefined ? waterRule.chemistryFactor : 1;
     }
+
+    /* Classificação recalculada sobre TODOS os parâmetros; fator de ração = o mais restritivo. */
+    var classification = buildOverallClassification(parameterResults);
+    var feedingAdvice = buildFeedingWaterAdvice(input, engineChemistryFactor);
 
     var metrics = {
       parameterResults: parameterResults,
@@ -27900,6 +28406,8 @@
       nh3MgL: input.nh3MgL,
 
       waterFeedingFactor: feedingAdvice.waterFeedingFactor,
+      waterTemperatureFactor: feedingAdvice.waterTemperatureFactor,
+      waterChemistryFactor: feedingAdvice.waterChemistryFactor,
       recommendedFeedingAction: feedingAdvice.recommendedFeedingAction,
       feedingWaterMessage: feedingAdvice.feedingWaterMessage,
 
@@ -28148,6 +28656,8 @@
       waterQualityScore: metrics.waterQualityScore,
 
       waterFeedingFactor: metrics.waterFeedingFactor,
+      waterTemperatureFactor: metrics.waterTemperatureFactor,
+      waterChemistryFactor: metrics.waterChemistryFactor,
       recommendedFeedingAction: metrics.recommendedFeedingAction,
       feedingWaterMessage: metrics.feedingWaterMessage,
 
@@ -28194,7 +28704,10 @@
       currentWaterQualitySeverity: record ? record.technicalSeverity || "" : "",
       currentWaterQualityMessage: record ? record.technicalMessage || "" : "",
 
-      waterFeedingFactor: record ? record.waterFeedingFactor || 1 : 1,
+      /* Fator 0 (suspender) precisa ser preservado; "|| 1" transformava suspensão em manter. */
+      waterFeedingFactor: record && record.waterFeedingFactor !== undefined && record.waterFeedingFactor !== null && record.waterFeedingFactor !== "" ? Number(record.waterFeedingFactor) : 1,
+      waterTemperatureFactor: record && record.waterTemperatureFactor !== undefined ? record.waterTemperatureFactor : null,
+      waterChemistryFactor: record && record.waterChemistryFactor !== undefined ? record.waterChemistryFactor : null,
       recommendedFeedingAction: record ? record.recommendedFeedingAction || "" : "",
       feedingWaterMessage: record ? record.feedingWaterMessage || "" : "",
 
@@ -28232,7 +28745,10 @@
       currentWaterRecommendations: record ? record.technicalRecommendations || [] : [],
       currentWaterRecommendationsText: record ? record.technicalRecommendationsText || "" : "",
 
-      waterFeedingFactor: record ? record.waterFeedingFactor || 1 : 1,
+      /* Fator 0 (suspender) precisa ser preservado; "|| 1" transformava suspensão em manter. */
+      waterFeedingFactor: record && record.waterFeedingFactor !== undefined && record.waterFeedingFactor !== null && record.waterFeedingFactor !== "" ? Number(record.waterFeedingFactor) : 1,
+      waterTemperatureFactor: record && record.waterTemperatureFactor !== undefined ? record.waterTemperatureFactor : null,
+      waterChemistryFactor: record && record.waterChemistryFactor !== undefined ? record.waterChemistryFactor : null,
       recommendedFeedingAction: record ? record.recommendedFeedingAction || "" : "",
       feedingWaterMessage: record ? record.feedingWaterMessage || "" : "",
 
@@ -28604,28 +29120,18 @@
       .replace(/'/g, "&#039;");
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function formatNumber(value, decimals) {
@@ -29750,53 +30256,10 @@
   var PONDS_CHANGED_EVENT = "aquagest:ponds-changed";
   var PRODUCTION_CHANGED_EVENT = "aquagest:production-changed";
 
-  var TILAPIA_NUTRITION_TABLE = [
-    {
-      phase: "larvas_alevinos",
-      phaseLabel: "Larvas e Alevinos / Iniciantes",
-      minWeightG: 0,
-      maxWeightG: 30,
-      weightLabel: "1 g a 30 g",
-      physicalTypes: ["po", "farelada", "microextrusada"],
-      physicalTypesLabel: "Pó, farelada ou microextrusada",
-      pelletMinMm: 0.8,
-      pelletMaxMm: 1.7,
-      pelletLabel: "Pó/farelada ou microextrusada de 0,8 mm a 1,7 mm",
-      proteinMinPercent: 40,
-      proteinMaxPercent: 50,
-      managementNote: "Exigem dietas altamente proteicas e maior frequência de trato diário."
-    },
-    {
-      phase: "juvenil_recria",
-      phaseLabel: "Juvenil / Recria",
-      minWeightG: 30,
-      maxWeightG: 100,
-      weightLabel: "30 g a 100 g",
-      physicalTypes: ["extrusada"],
-      physicalTypesLabel: "Extrusada",
-      pelletMinMm: 2,
-      pelletMaxMm: 3,
-      pelletLabel: "Extrusada de 2,0 mm a 3,0 mm",
-      proteinMinPercent: 36,
-      proteinMaxPercent: 40,
-      managementNote: "A biometria é fundamental para ajustar a ração e reduzir desigualdade de crescimento."
-    },
-    {
-      phase: "terminacao",
-      phaseLabel: "Terminação",
-      minWeightG: 100,
-      maxWeightG: 999999,
-      weightLabel: "Acima de 100 g até o abate",
-      physicalTypes: ["extrusada"],
-      physicalTypesLabel: "Extrusada",
-      pelletMinMm: 4,
-      pelletMaxMm: 7,
-      pelletLabel: "Extrusada de 4,0 mm a 7,0 mm",
-      proteinMinPercent: 32,
-      proteinMaxPercent: 36,
-      managementNote: "A transição de granulometria deve ser gradual conforme crescimento, consumo e biometria."
-    }
-  ];
+  /* Tabela nutricional ÚNICA: RacaoTecnicaService.table (racao-tecnica-service). */
+  function getNutritionTable() {
+    return window.RacaoTecnicaService && window.RacaoTecnicaService.table ? window.RacaoTecnicaService.table : [];
+  }
 
   function ensureDependencies() {
     if (!window.database) {
@@ -29853,28 +30316,18 @@
     return false;
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(value, decimals) {
@@ -30117,6 +30570,9 @@
   }
 
   function normalizeFeedPhase(value) {
+    if (window.RacaoTecnicaService && typeof window.RacaoTecnicaService.normalizePhase === "function") {
+      return window.RacaoTecnicaService.normalizePhase(value);
+    }
     var text = normalizeSearch(value)
       .replace(/\s+/g, "_")
       .replace(/-/g, "_");
@@ -30219,15 +30675,10 @@
   }
 
   function getRecommendedNutritionByWeight(averageWeightG) {
-    var weight = toNumber(averageWeightG);
-
-    if (!weight) {
-      return null;
+    if (window.RacaoTecnicaService && typeof window.RacaoTecnicaService.suggestFeedProfileByWeight === "function") {
+      return window.RacaoTecnicaService.suggestFeedProfileByWeight(averageWeightG);
     }
-
-    return TILAPIA_NUTRITION_TABLE.find(function (item) {
-      return weight >= item.minWeightG && weight < item.maxWeightG;
-    }) || TILAPIA_NUTRITION_TABLE[TILAPIA_NUTRITION_TABLE.length - 1];
+    return null;
   }
 
   function isPhysicalTypeAllowed(physicalType, recommended) {
@@ -30937,6 +31388,121 @@
     };
   }
 
+  /*
+    Ração diária recomendada (avaliação técnica, itens 5 e menores):
+    - a temperatura é aplicada UMA vez, aqui, com a leitura mais recente;
+    - a biometria fornece a ração-base (sem temperatura);
+    - leitura de água com mais de 48 h não reduz a ração sozinha (só avisa);
+    - entre biometrias, o peso é estimado por peso da última biometria + GPD × dias.
+  */
+  var WATER_READING_MAX_AGE_HOURS = 48;
+
+  function feedingActionFromFactor(factor) {
+    if (factor <= 0) return { action: "Suspender arraçoamento", message: "Condição crítica para alimentação. Suspender ou revisar o arraçoamento até nova avaliação." };
+    if (factor <= 0.5) return { action: "Reduzir fortemente arraçoamento", message: "Condição exige forte redução da ração e monitoramento do lote." };
+    if (factor < 1) return { action: "Reduzir arraçoamento", message: "Condição exige ajuste preventivo da alimentação." };
+    return { action: "Manter arraçoamento previsto", message: "Condição não exige redução automática de ração." };
+  }
+
+  function readingAgeHours(record, nowMs) {
+    if (!record || !record.date) return null;
+    var time = /^\d{2}:\d{2}/.test(String(record.time || "")) ? String(record.time).slice(0, 5) : "12:00";
+    var ms = Date.parse(String(record.date).slice(0, 10) + "T" + time + ":00");
+    if (!Number.isFinite(ms)) return null;
+    return Math.max(0, (nowMs - ms) / 3600000);
+  }
+
+  function daysBetweenLocal(fromIso, nowMs) {
+    if (!fromIso) return 0;
+    var from = Date.parse(String(fromIso).slice(0, 10) + "T12:00:00");
+    if (!Number.isFinite(from)) return 0;
+    var now = new Date(nowMs);
+    var today = Date.parse(now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0") + "T12:00:00");
+    return Math.max(0, Math.round((today - from) / 86400000));
+  }
+
+  function resolveDailyFeeding(options) {
+    var o = options || {};
+    var biometry = o.biometry || {};
+    var water = o.water || null;
+    var nowMs = o.nowMs || Date.now();
+    var engine = window.TechnicalEngine;
+
+    /* 1) Ração-base, acompanhando o crescimento entre biometrias. */
+    var manual = biometry.feedingPercentManual === true;
+    var hasBase = biometry.recommendedFeedDayBaseKg !== undefined && biometry.recommendedFeedDayBaseKg !== null && biometry.recommendedFeedDayBaseKg !== "";
+    var legacy = !hasBase;
+    var baseDayKg = hasBase ? toNumber(biometry.recommendedFeedDayBaseKg) : toNumber(o.legacyRecommendedFeedDayKg);
+    var estimatedAverageWeightG = toNumber(o.averageWeightG);
+    var estimatedBiomassKg = toNumber(o.biomassKg);
+    var gpd = toNumber(biometry.gpdGDay);
+    var days = daysBetweenLocal(biometry.date, nowMs);
+    var population = toNumber(o.population);
+
+    if (hasBase && gpd > 0 && days > 0 && population > 0 && toNumber(biometry.averageWeightG) > 0) {
+      estimatedAverageWeightG = toNumber(biometry.averageWeightG) + gpd * days;
+      estimatedBiomassKg = population * estimatedAverageWeightG / 1000;
+      var dosePercent = toNumber(biometry.feedingDosePercent);
+      if (!manual && window.BiometriaService && typeof window.BiometriaService.suggestFeedingPercent === "function") {
+        dosePercent = toNumber(window.BiometriaService.suggestFeedingPercent(estimatedAverageWeightG, 0).basePercent);
+      }
+      if (dosePercent > 0) baseDayKg = estimatedBiomassKg * dosePercent / 100;
+    }
+
+    /* 2) Leitura de água: vale só até 48 h. */
+    var ageHours = readingAgeHours(water, nowMs);
+    var waterFresh = !!water && ageHours !== null && ageHours <= WATER_READING_MAX_AGE_HOURS;
+    var waterStale = !!water && !waterFresh;
+
+    var chemistryFactor = 1;
+    var waterTemperature = 0;
+
+    if (waterFresh) {
+      if (water.waterChemistryFactor !== undefined && water.waterChemistryFactor !== null && water.waterChemistryFactor !== "") {
+        chemistryFactor = toNumber(water.waterChemistryFactor);
+      } else if (window.AguaService && typeof window.AguaService.calculateWaterQualityMetrics === "function") {
+        try { chemistryFactor = toNumber(window.AguaService.calculateWaterQualityMetrics(water).waterChemistryFactor); } catch (e) { chemistryFactor = 1; }
+      } else {
+        chemistryFactor = toNumber(firstNumberFromObjects([water], ["waterFeedingFactor"], 1));
+      }
+      waterTemperature = toNumber(water.temperatureC);
+    }
+
+    if (!Number.isFinite(chemistryFactor) || chemistryFactor < 0) chemistryFactor = 1;
+
+    /* 3) Temperatura: leitura de água recente; senão, a temperatura da biometria. */
+    var temperature = waterTemperature > 0 ? waterTemperature : toNumber(biometry.temperatureC);
+    var temperatureFactor = engine && typeof engine.feedingTemperatureFactor === "function" && temperature > 0
+      ? engine.feedingTemperatureFactor(temperature)
+      : 1;
+
+    /* Percentual digitado pelo operador ou registro antigo (já ajustado): só a química. */
+    var temperatureApplied = !manual && !legacy;
+    var finalFactor = temperatureApplied ? Math.min(temperatureFactor, chemistryFactor) : chemistryFactor;
+    var advice = feedingActionFromFactor(finalFactor);
+    var message = advice.message;
+
+    if (waterStale) {
+      message = "Leitura de água desatualizada (" + Math.round(ageHours / 24) + " dia(s)). Ela não reduz a ração sozinha; faça nova medição. " + message;
+    } else if (!water) {
+      message = "Sem leitura de água recente. " + message;
+    }
+
+    return {
+      baseDayKg: baseDayKg,
+      temperatureFactor: temperatureFactor,
+      chemistryFactor: chemistryFactor,
+      temperatureApplied: temperatureApplied,
+      finalFactor: finalFactor,
+      waterStale: waterStale,
+      waterAgeHours: ageHours === null ? null : Math.round(ageHours),
+      estimatedAverageWeightG: estimatedAverageWeightG,
+      estimatedBiomassKg: estimatedBiomassKg,
+      action: advice.action,
+      message: message
+    };
+  }
+
   function buildLotOption(cycle, pond, source, latestBiometry, latestWater) {
     var sourceObj = source || {};
     var cycleObj = cycle || {};
@@ -31026,12 +31592,21 @@
       recommendedFeedMealKg = recommendedFeedDayKg / mealsPerDay;
     }
 
-    var waterFeedingFactor = firstNumberFromObjects(waterObjects, [
-      "waterFeedingFactor"
-    ], 1);
+    var feeding = resolveDailyFeeding({
+      biometry: biometryObj,
+      water: latestWater || null,
+      waterObjects: waterObjects,
+      population: currentPopulation,
+      averageWeightG: currentAverageWeightG,
+      biomassKg: currentBiomassKg,
+      legacyRecommendedFeedDayKg: recommendedFeedDayKg
+    });
 
-    if (!Number.isFinite(waterFeedingFactor) || waterFeedingFactor < 0) {
-      waterFeedingFactor = 1;
+    var waterFeedingFactor = feeding.finalFactor;
+
+    if (feeding.baseDayKg > 0) {
+      recommendedFeedDayKg = feeding.baseDayKg;
+      recommendedFeedMealKg = mealsPerDay > 0 ? recommendedFeedDayKg / mealsPerDay : 0;
     }
 
     return {
@@ -31066,8 +31641,15 @@
       currentWaterQualitySeverity: firstTextFromObjects(waterObjects, ["technicalSeverity", "currentWaterQualitySeverity"], ""),
       currentWaterQualityMessage: firstTextFromObjects(waterObjects, ["technicalMessage", "currentWaterQualityMessage"], ""),
       waterFeedingFactor: round(waterFeedingFactor, 2),
-      recommendedFeedingAction: firstTextFromObjects(waterObjects, ["recommendedFeedingAction"], ""),
-      feedingWaterMessage: firstTextFromObjects(waterObjects, ["feedingWaterMessage"], ""),
+      feedingTemperatureFactor: round(feeding.temperatureFactor, 2),
+      waterChemistryFactor: round(feeding.chemistryFactor, 2),
+      temperatureAppliedInFeeding: feeding.temperatureApplied,
+      waterReadingStale: feeding.waterStale,
+      waterReadingAgeHours: feeding.waterAgeHours,
+      estimatedAverageWeightG: round(feeding.estimatedAverageWeightG, 2),
+      estimatedBiomassKg: round(feeding.estimatedBiomassKg, 3),
+      recommendedFeedingAction: feeding.action,
+      feedingWaterMessage: feeding.message,
 
       feedingRecordedTotalKg: firstNumberFromObjects(productionObjects, ["feedingRecordedTotalKg", "feedingProvidedTotalKg"], 0),
       feedingStockConsumptionTotalKg: firstNumberFromObjects(productionObjects, ["feedingStockConsumptionTotalKg"], 0),
@@ -32442,11 +33024,12 @@
     voidFeedingRecord: voidFeedingRecord,
 
     rebuildCycleFeedingState: rebuildCycleFeedingState,
+    resolveDailyFeeding: resolveDailyFeeding,
     formatFeedingForForm: formatFeedingForForm,
 
     classifyFeedProfile: classifyFeedProfile,
     getRecommendedNutritionByWeight: getRecommendedNutritionByWeight,
-    nutritionGuideTable: TILAPIA_NUTRITION_TABLE,
+    get nutritionGuideTable() { return getNutritionTable(); },
 
     normalizeFeedPhysicalType: normalizeFeedPhysicalType,
     translateFeedPhysicalType: translateFeedPhysicalType,
@@ -32571,6 +33154,9 @@
   }
 
   function normalizeFeedPhase(value) {
+    if (window.RacaoTecnicaService && typeof window.RacaoTecnicaService.normalizePhase === "function") {
+      return window.RacaoTecnicaService.normalizePhase(value);
+    }
     var text = normalizeSearch(value)
       .replace(/\s+/g, "_")
       .replace(/-/g, "_");
@@ -34464,151 +35050,109 @@
 
 /* ===== js/services/racao-tecnica-service-v4-senar-furuya.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/racao-tecnica-service-v4-senar-furuya.js
-  Etapa: 8.1 — Perfil técnico da ração
-  Versão: racao-tecnica-service-v4-senar-furuya
-  Status: referência técnica inicial para fase, proteína bruta e granulometria da ração para tilápia
-*/
+  Função: tabela nutricional ÚNICA da tilápia (fase, faixa de peso, PB mínima e máxima,
+  granulometria e tipo físico), usada por arraçoamento, estoque e motor técnico.
 
+  - As fases usam os mesmos códigos do cadastro do estoque:
+    larvas_alevinos, juvenil_recria, terminacao.
+  - O valor de Furuya (TechnicalEngine.feedProfile) é só uma referência exibida;
+    a avaliação usa a faixa mínima/máxima da tabela.
+*/
 (function () {
   "use strict";
 
+  var PHASE_LABELS = {
+    larvas_alevinos: "Larvas e Alevinos / Iniciantes",
+    juvenil_recria: "Juvenil / Recria",
+    terminacao: "Terminação"
+  };
+
+  var PHASE_NOTES = {
+    larvas_alevinos: "Exigem dietas altamente proteicas e maior frequência de trato diário.",
+    juvenil_recria: "A biometria é fundamental para ajustar a ração e reduzir desigualdade de crescimento.",
+    terminacao: "A transição de granulometria deve ser gradual conforme crescimento, consumo e biometria."
+  };
+
   var TILAPIA_FEED_PROFILE_TABLE = [
-    {
-      phase: "pos_larva",
-      phaseLabel: "Pós-larva",
-      minWeightG: 0,
-      maxWeightG: 1,
-      proteinMinPercent: 45,
-      proteinMaxPercent: 50,
-      pelletMinMm: 0.3,
-      pelletMaxMm: 0.8
-    },
-    {
-      phase: "alevino_inicial",
-      phaseLabel: "Alevino inicial",
-      minWeightG: 1,
-      maxWeightG: 5,
-      proteinMinPercent: 40,
-      proteinMaxPercent: 45,
-      pelletMinMm: 0.8,
-      pelletMaxMm: 1.2
-    },
-    {
-      phase: "alevino",
-      phaseLabel: "Alevino",
-      minWeightG: 5,
-      maxWeightG: 20,
-      proteinMinPercent: 36,
-      proteinMaxPercent: 40,
-      pelletMinMm: 1.2,
-      pelletMaxMm: 2
-    },
-    {
-      phase: "juvenil",
-      phaseLabel: "Juvenil",
-      minWeightG: 20,
-      maxWeightG: 100,
-      proteinMinPercent: 32,
-      proteinMaxPercent: 36,
-      pelletMinMm: 2,
-      pelletMaxMm: 3
-    },
-    {
-      phase: "crescimento",
-      phaseLabel: "Crescimento",
-      minWeightG: 100,
-      maxWeightG: 300,
-      proteinMinPercent: 28,
-      proteinMaxPercent: 32,
-      pelletMinMm: 3,
-      pelletMaxMm: 4
-    },
-    {
-      phase: "engorda",
-      phaseLabel: "Engorda",
-      minWeightG: 300,
-      maxWeightG: 600,
-      proteinMinPercent: 28,
-      proteinMaxPercent: 32,
-      pelletMinMm: 4,
-      pelletMaxMm: 6
-    },
-    {
-      phase: "terminacao",
-      phaseLabel: "Terminação",
-      minWeightG: 600,
-      maxWeightG: 999999,
-      proteinMinPercent: 26,
-      proteinMaxPercent: 30,
-      pelletMinMm: 6,
-      pelletMaxMm: 8
-    }
-  ];
+    { phase: "larvas_alevinos", bandLabel: "Pós-larva", minWeightG: 0, maxWeightG: 1, weightLabel: "até 1 g", proteinMinPercent: 45, proteinMaxPercent: 50, pelletMinMm: 0.3, pelletMaxMm: 0.8, physicalTypes: ["po", "farelada", "microextrusada"] },
+    { phase: "larvas_alevinos", bandLabel: "Alevino inicial", minWeightG: 1, maxWeightG: 5, weightLabel: "1 g a 5 g", proteinMinPercent: 40, proteinMaxPercent: 45, pelletMinMm: 0.8, pelletMaxMm: 1.2, physicalTypes: ["po", "farelada", "microextrusada"] },
+    { phase: "larvas_alevinos", bandLabel: "Alevino", minWeightG: 5, maxWeightG: 30, weightLabel: "5 g a 30 g", proteinMinPercent: 36, proteinMaxPercent: 40, pelletMinMm: 1.2, pelletMaxMm: 2, physicalTypes: ["microextrusada", "extrusada"] },
+    { phase: "juvenil_recria", bandLabel: "Juvenil / recria", minWeightG: 30, maxWeightG: 100, weightLabel: "30 g a 100 g", proteinMinPercent: 32, proteinMaxPercent: 36, pelletMinMm: 2, pelletMaxMm: 3, physicalTypes: ["extrusada"] },
+    { phase: "terminacao", bandLabel: "Crescimento", minWeightG: 100, maxWeightG: 300, weightLabel: "100 g a 300 g", proteinMinPercent: 28, proteinMaxPercent: 32, pelletMinMm: 3, pelletMaxMm: 4, physicalTypes: ["extrusada"] },
+    { phase: "terminacao", bandLabel: "Engorda", minWeightG: 300, maxWeightG: 600, weightLabel: "300 g a 600 g", proteinMinPercent: 28, proteinMaxPercent: 32, pelletMinMm: 4, pelletMaxMm: 6, physicalTypes: ["extrusada"] },
+    { phase: "terminacao", bandLabel: "Terminação", minWeightG: 600, maxWeightG: 999999, weightLabel: "acima de 600 g", proteinMinPercent: 26, proteinMaxPercent: 30, pelletMinMm: 6, pelletMaxMm: 8, physicalTypes: ["extrusada"] }
+  ].map(function (row) {
+    row.phaseLabel = PHASE_LABELS[row.phase];
+    row.managementNote = PHASE_NOTES[row.phase];
+    row.pelletLabel = row.pelletMinMm + " a " + row.pelletMaxMm + " mm";
+    row.physicalTypesLabel = row.physicalTypes.map(translatePhysicalType).join(", ");
+    return row;
+  });
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s ]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(value, decimals) {
-    var fixedDecimals = Number.isInteger(decimals) ? decimals : 2;
-    var factor = Math.pow(10, fixedDecimals);
-
+    var factor = Math.pow(10, Number.isInteger(decimals) ? decimals : 2);
     return Math.round((Number(value) || 0) * factor) / factor;
   }
 
-  function normalizeText(value) {
-    return String(value === null || value === undefined ? "" : value).trim();
+  function normalizeSearch(value) {
+    return String(value === null || value === undefined ? "" : value).trim().toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, "_").replace(/-/g, "_");
   }
 
+  /* normalizePhase ÚNICO: converte todos os nomes antigos para os códigos da tabela. */
   function normalizePhase(value) {
-    var text = normalizeText(value)
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/\s+/g, "_");
-
-    if (text === "pos_larva" || text === "pos-larva") return "pos_larva";
-    if (text === "alevino_inicial") return "alevino_inicial";
-    if (text === "alevino") return "alevino";
-    if (text === "juvenil") return "juvenil";
-    if (text === "crescimento") return "crescimento";
-    if (text === "engorda") return "engorda";
-    if (text === "terminacao") return "terminacao";
-
+    var text = normalizeSearch(value);
+    if (!text) return "";
+    if (["larvas_alevinos", "larva", "larvas", "alevino", "alevinos", "iniciante", "iniciantes", "pos_larva", "alevino_inicial", "reversao"].indexOf(text) >= 0) return "larvas_alevinos";
+    if (["juvenil_recria", "juvenil", "juvenis", "recria", "pos_reversao"].indexOf(text) >= 0) return "juvenil_recria";
+    if (["terminacao", "finalizacao", "engorda", "crescimento"].indexOf(text) >= 0) return "terminacao";
     return text;
+  }
+
+  function translatePhase(value) {
+    var phase = normalizePhase(value);
+    return PHASE_LABELS[phase] || (phase ? String(value) : "Não informado");
+  }
+
+  function normalizePhysicalType(value) {
+    var text = normalizeSearch(value);
+    if (!text) return "";
+    if (["po", "racao_em_po"].indexOf(text) >= 0) return "po";
+    if (["farelada", "farelo", "farinhada"].indexOf(text) >= 0) return "farelada";
+    if (["microextrusada", "micro_extrusada", "micro"].indexOf(text) >= 0) return "microextrusada";
+    if (["extrusada", "extrusado", "extruded"].indexOf(text) >= 0) return "extrusada";
+    return text;
+  }
+
+  function translatePhysicalType(value) {
+    var type = normalizePhysicalType(value);
+    return { po: "Pó", farelada: "Farelada", microextrusada: "Microextrusada", extrusada: "Extrusada" }[type] || (type ? String(value) : "Não informado");
   }
 
   function getProfileByPhase(phase) {
     var normalized = normalizePhase(phase);
-
-    return TILAPIA_FEED_PROFILE_TABLE.find(function (item) {
-      return item.phase === normalized;
-    }) || null;
+    return TILAPIA_FEED_PROFILE_TABLE.find(function (item) { return item.phase === normalized; }) || null;
   }
 
   function suggestFeedProfileByWeight(averageWeightG) {
     var weight = toNumber(averageWeightG);
-
+    if (!weight) return null;
     return TILAPIA_FEED_PROFILE_TABLE.find(function (item) {
       return weight >= item.minWeightG && weight < item.maxWeightG;
     }) || TILAPIA_FEED_PROFILE_TABLE[TILAPIA_FEED_PROFILE_TABLE.length - 1];
@@ -34620,137 +35164,115 @@
     var crudeProteinPercent = toNumber(input.crudeProteinPercent);
     var pelletSizeMm = toNumber(input.pelletSizeMm);
     var feedPhase = normalizePhase(input.feedPhase);
-
-    var hasProtein = crudeProteinPercent > 0;
-    var hasPellet = pelletSizeMm > 0;
-    var hasPhase = !!feedPhase;
-
+    var feedPhysicalType = normalizePhysicalType(input.feedPhysicalType);
     var recommended = suggestFeedProfileByWeight(averageWeightG);
 
-    if (window.TechnicalEngine && typeof window.TechnicalEngine.feedProfile === "function") {
-      var consolidated = window.TechnicalEngine.feedProfile(averageWeightG);
-      recommended = Object.assign({}, recommended, {
-        phase: consolidated.phase,
-        phaseLabel: consolidated.phaseLabel,
-        proteinMinPercent: consolidated.crudeProteinPercent,
-        proteinMaxPercent: consolidated.crudeProteinPercent,
-        source: consolidated.source
-      });
-    }
-    var severity = "normal";
-    var status = "Perfil da ração adequado";
-    var messages = [];
-
-    if (!averageWeightG) {
+    if (!recommended) {
       return {
-        recommendedFeedPhase: "",
-        recommendedFeedPhaseLabel: "Aguardando peso médio",
-        recommendedProteinMinPercent: 0,
-        recommendedProteinMaxPercent: 0,
-        recommendedPelletMinMm: 0,
-        recommendedPelletMaxMm: 0,
-
-        feedProfileStatus: "Aguardando peso médio",
-        feedProfileSeverity: "pending",
+        recommendedFeedPhase: "", recommendedFeedPhaseLabel: "Aguardando peso médio",
+        recommendedProteinMinPercent: 0, recommendedProteinMaxPercent: 0,
+        recommendedPelletMinMm: 0, recommendedPelletMaxMm: 0,
+        recommendedPhysicalTypes: [], recommendedPhysicalTypesLabel: "",
+        feedPhase: feedPhase, feedPhaseLabel: translatePhase(feedPhase),
+        feedPhysicalType: feedPhysicalType, feedPhysicalTypeLabel: translatePhysicalType(feedPhysicalType),
+        crudeProteinPercent: round(crudeProteinPercent, 2), pelletSizeMm: round(pelletSizeMm, 2),
+        feedProfileStatus: "Aguardando peso médio", feedProfileSeverity: "pending",
         feedProfileMessage: "O sistema precisa do peso médio do lote para sugerir fase, proteína e granulometria.",
         feedProfileRecommendations: []
       };
     }
 
-    if (hasPhase && feedPhase !== recommended.phase) {
-      severity = "warning";
-      messages.push(
-        "A fase informada não corresponde à fase sugerida pelo peso médio atual."
-      );
+    /* Referência de Furuya: apenas informativa. */
+    var reference = window.TechnicalEngine && typeof window.TechnicalEngine.feedProfile === "function"
+      ? window.TechnicalEngine.feedProfile(averageWeightG)
+      : null;
+
+    var severity = "normal";
+    var recommendations = [];
+
+    function addIssue(level, title, message) {
+      if (level === "critical") severity = "critical";
+      else if (level === "warning" && severity !== "critical") severity = "warning";
+      recommendations.push({ severity: level, title: title, message: message });
     }
 
-    if (hasProtein) {
+    if (feedPhase && feedPhase !== recommended.phase) {
+      addIssue("warning", "Fase da ração", "A fase informada não corresponde à fase sugerida pelo peso médio atual (" + recommended.phaseLabel + ").");
+    }
+
+    if (feedPhysicalType && recommended.physicalTypes.indexOf(feedPhysicalType) < 0) {
+      addIssue("warning", "Tipo físico da ração", "O tipo físico informado não é o mais indicado para o peso atual (" + recommended.physicalTypesLabel + ").");
+    }
+
+    if (crudeProteinPercent > 0) {
       if (crudeProteinPercent < recommended.proteinMinPercent) {
-        severity = crudeProteinPercent <= recommended.proteinMinPercent - 2 ? "critical" : "warning";
-        messages.push(
-          "Proteína bruta abaixo da faixa recomendada para a fase."
-        );
-      }
-
-      if (crudeProteinPercent > recommended.proteinMaxPercent) {
-        if (severity !== "critical") {
-          severity = "warning";
-        }
-
-        messages.push(
-          "Proteína bruta acima da faixa recomendada. Pode elevar custo sem ganho proporcional."
-        );
+        addIssue(crudeProteinPercent <= recommended.proteinMinPercent - 4 ? "critical" : "warning", "Proteína bruta",
+          "Proteína bruta abaixo da faixa recomendada (" + recommended.proteinMinPercent + "% a " + recommended.proteinMaxPercent + "%).");
+      } else if (crudeProteinPercent > recommended.proteinMaxPercent) {
+        addIssue("warning", "Proteína bruta",
+          "Proteína bruta acima da faixa recomendada (" + recommended.proteinMinPercent + "% a " + recommended.proteinMaxPercent + "%). Pode elevar custo sem ganho proporcional.");
       }
     } else {
-      if (severity !== "critical") {
-        severity = "warning";
-      }
-
-      messages.push("Proteína bruta da ração não informada.");
+      addIssue("warning", "Proteína bruta", "Proteína bruta da ração não informada.");
     }
 
-    if (hasPellet) {
-      if (
-        pelletSizeMm < recommended.pelletMinMm ||
-        pelletSizeMm > recommended.pelletMaxMm
-      ) {
-        if (severity !== "critical") {
-          severity = "warning";
+    var pelletOptional = recommended.phase === "larvas_alevinos" && (feedPhysicalType === "po" || feedPhysicalType === "farelada");
+    if (!pelletOptional) {
+      if (pelletSizeMm > 0) {
+        if (pelletSizeMm < recommended.pelletMinMm || pelletSizeMm > recommended.pelletMaxMm) {
+          var distance = Math.min(Math.abs(pelletSizeMm - recommended.pelletMinMm), Math.abs(pelletSizeMm - recommended.pelletMaxMm));
+          addIssue(distance >= 2 ? "critical" : "warning", "Granulometria",
+            "Granulometria fora da faixa sugerida para o peso médio do lote (" + recommended.pelletLabel + ").");
         }
-
-        messages.push(
-          "Granulometria fora da faixa sugerida para o peso médio do lote."
-        );
+      } else {
+        addIssue("warning", "Granulometria", "Granulometria da ração não informada.");
       }
-    } else {
-      if (severity !== "critical") {
-        severity = "warning";
-      }
-
-      messages.push("Granulometria da ração não informada.");
     }
 
-    if (severity === "critical") {
-      status = "Crítico — perfil nutricional inadequado";
-    } else if (severity === "warning") {
-      status = "Atenção — revisar perfil da ração";
+    if (!recommendations.length) {
+      recommendations.push({ severity: "normal", title: "Perfil nutricional", message: "Fase, proteína bruta e granulometria estão coerentes com o peso médio informado." });
     }
 
-    if (!messages.length) {
-      messages.push(
-        "Fase, proteína bruta e granulometria estão coerentes com o peso médio informado."
-      );
-    }
+    var status = severity === "critical" ? "Crítico — perfil nutricional inadequado"
+      : severity === "warning" ? "Atenção — revisar perfil da ração"
+        : "Perfil da ração adequado";
 
     return {
       recommendedFeedPhase: recommended.phase,
       recommendedFeedPhaseLabel: recommended.phaseLabel,
+      recommendedBandLabel: recommended.bandLabel,
+      recommendedWeightLabel: recommended.weightLabel,
+      recommendedPhysicalTypes: recommended.physicalTypes.slice(),
+      recommendedPhysicalTypesLabel: recommended.physicalTypesLabel,
       recommendedProteinMinPercent: recommended.proteinMinPercent,
       recommendedProteinMaxPercent: recommended.proteinMaxPercent,
       recommendedPelletMinMm: recommended.pelletMinMm,
       recommendedPelletMaxMm: recommended.pelletMaxMm,
-
+      recommendedPelletLabel: recommended.pelletLabel,
+      recommendedManagementNote: recommended.managementNote,
+      referenceProteinPercent: reference ? reference.crudeProteinPercent : null,
+      referenceSource: reference ? reference.source : "",
       feedPhase: feedPhase,
+      feedPhaseLabel: translatePhase(feedPhase),
+      feedPhysicalType: feedPhysicalType,
+      feedPhysicalTypeLabel: translatePhysicalType(feedPhysicalType),
       crudeProteinPercent: round(crudeProteinPercent, 2),
       pelletSizeMm: round(pelletSizeMm, 2),
-
       feedProfileStatus: status,
       feedProfileSeverity: severity,
-      feedProfileMessage: messages.join(" "),
-
-      feedProfileRecommendations: messages.map(function (message) {
-        return {
-          severity: severity,
-          title: "Perfil técnico da ração",
-          message: message
-        };
-      })
+      feedProfileMessage: recommendations.map(function (item) { return item.message; }).join(" ") +
+        (reference ? " Referência de proteína (" + reference.source + "): " + String(reference.crudeProteinPercent).replace(".", ",") + "% PB." : ""),
+      feedProfileRecommendations: recommendations
     };
   }
 
   window.RacaoTecnicaService = {
     table: TILAPIA_FEED_PROFILE_TABLE,
+    phaseLabels: PHASE_LABELS,
     normalizePhase: normalizePhase,
+    translatePhase: translatePhase,
+    normalizePhysicalType: normalizePhysicalType,
+    translatePhysicalType: translatePhysicalType,
     getProfileByPhase: getProfileByPhase,
     suggestFeedProfileByWeight: suggestFeedProfileByWeight,
     classifyFeedProfile: classifyFeedProfile
@@ -34846,56 +35368,18 @@
     return fallback;
   }
 
-  function toNumber(value) {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      return 0;
-    }
-
-    if (
-      typeof value === "number"
-    ) {
-      return Number.isFinite(value)
-        ? value
-        : 0;
-    }
-
-    var text =
-      String(value)
-        .trim()
-        .replace(/\s/g, "");
-
-    if (
-      text.indexOf(",") >= 0 &&
-      text.indexOf(".") >= 0
-    ) {
-      text =
-        text
-          .replace(/\./g, "")
-          .replace(",", ".");
-    } else if (
-      text.indexOf(",") >= 0
-    ) {
-      text =
-        text.replace(",", ".");
-    } else if (
-      /^\d{1,3}(\.\d{3})+$/.test(
-        text
-      )
-    ) {
-      text =
-        text.replace(/\./g, "");
-    }
-
-    var number =
-      Number(text);
-
-    return Number.isFinite(number)
-      ? number
-      : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(
@@ -34937,6 +35421,11 @@
       b &&
       a === b
     );
+  }
+
+  function localTodayIso() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
 
   function nowIso() {
@@ -36013,32 +36502,19 @@
           }
         );
 
+    /* Água sem lote vinculado só entra se a data estiver dentro do período do ciclo. */
+    var cycleStartForWater = String(firstValue(cycle, ["startDate"], firstValue(stocking, ["startDate", "date"], "")) || "").slice(0, 10);
+    var cycleEndForWater = String(firstValue(cycle, ["endDate", "closedAt", "harvestDate"], "") || "").slice(0, 10) || localTodayIso();
     var water =
-      data.water
-        .filter(
-          function (item) {
-            var recordCycleId =
-              getRecordCycleId(
-                item
-              );
-
-            if (recordCycleId) {
-              return sameId(
-                recordCycleId,
-                cycle.id
-              );
-            }
-
-            return (
-              item.pondId &&
-              cycle.pondId &&
-              sameId(
-                item.pondId,
-                cycle.pondId
-              )
-            );
-          }
-        );
+      data.water.filter(function (item) {
+        var recordCycleId = getRecordCycleId(item);
+        if (recordCycleId) {
+          return sameId(recordCycleId, cycle.id);
+        }
+        var date = String(item.date || "").slice(0, 10);
+        return !!(item.pondId && cycle.pondId && sameId(item.pondId, cycle.pondId) &&
+          date && (!cycleStartForWater || date >= cycleStartForWater) && date <= cycleEndForWater);
+      });
 
     var initialQuantity =
       toNumber(
@@ -36182,86 +36658,35 @@
         1000;
     }
 
-    var totalFeedKg =
-      feeding.reduce(
-        function (
-          total,
-          item
-        ) {
-          return (
-            total +
-            getFeedingQuantityKg(
-              item
-            )
-          );
-        },
-        0
-      );
-
+    /* CA do relatório: só a ração até a última biometria (mesma janela do ganho de biomassa). */
+    var fcrCutoff = latestBiometry && latestBiometry.date ? String(latestBiometry.date).slice(0, 10) : "";
+    var feedForFcr = feeding.filter(function (item) {
+      return !fcrCutoff || String(item.date || "").slice(0, 10) <= fcrCutoff;
+    });
+    var totalFeedKg = feeding.reduce(function (total, item) { return total + getFeedingQuantityKg(item); }, 0);
+    var feedForFcrKg = feedForFcr.reduce(function (total, item) { return total + getFeedingQuantityKg(item); }, 0);
+    var feedAfterLastBiometryKg = Math.max(0, totalFeedKg - feedForFcrKg);
     var totalStockConsumptionKg = feeding.reduce(function (total, item) {
       return total + getStockConsumptionQuantityKg(item);
     }, 0);
 
-    /*
-      Compatibilidade:
-      se Arraçoamento ainda não tiver registros,
-      usa alimentação informada nas biometrias.
-    */
-    if (
-      totalFeedKg <= 0
-    ) {
-      totalFeedKg =
-        biometries.reduce(
-          function (
-            total,
-            item
-          ) {
-            return (
-              total +
-              toNumber(
-                item.feedPeriodKg
-              )
-            );
-          },
-          0
-        );
+    /* Compatibilidade: sem registros de Arraçoamento, usa a ração informada nas biometrias. */
+    if (totalFeedKg <= 0) {
+      totalFeedKg = biometries.reduce(function (total, item) { return total + toNumber(item.feedPeriodKg); }, 0);
+      feedForFcrKg = totalFeedKg;
+      feedAfterLastBiometryKg = 0;
     }
 
-    var totalMortality =
-      mortality.reduce(
-        function (
-          total,
-          item
-        ) {
-          return (
-            total +
-            getMortalityQuantity(
-              item
-            )
-          );
-        },
-        0
-      );
-
-    if (
-      totalMortality <= 0
-    ) {
-      totalMortality =
-        biometries.reduce(
-          function (
-            total,
-            item
-          ) {
-            return (
-              total +
-              toNumber(
-                item.mortality
-              )
-            );
-          },
-          0
-        );
-    }
+    /* Movimentações do lote (mortalidade, despesca parcial, transferências). */
+    var movementSummary = window.FishMovementService
+      ? window.FishMovementService.summarize(mortality, cycle.id, "", fcrCutoff || "")
+      : null;
+    var movementDeaths = mortality.filter(function (item) {
+      var type = window.FishMovementService ? window.FishMovementService.normalizeType(item.movementType || item.type) : "mortalidade";
+      return type === "mortalidade";
+    }).reduce(function (total, item) { return total + getMortalityQuantity(item); }, 0);
+    var biometryDeaths = biometries.reduce(function (total, item) { return total + toNumber(item.mortality); }, 0);
+    var totalMortality = movementDeaths + biometryDeaths;
 
     var startDate =
       firstValue(
@@ -36282,7 +36707,7 @@
     var currentDate =
       latestBiometry
         ? latestBiometry.date
-        : nowIso()
+        : localTodayIso()
             .slice(0, 10);
 
     var cycleDays =
@@ -36291,45 +36716,24 @@
         currentDate
       );
 
-    var gpdGDay =
-      latestBiometry &&
-      latestBiometry
-        .gpdGDay !== 0
-        ? latestBiometry
-            .gpdGDay
-        : (
-            cycleDays > 0 &&
-            currentWeightG > 0 &&
-            initialWeightG > 0
-          )
-          ? (
-              currentWeightG -
-              initialWeightG
-            ) /
-            cycleDays
-          : 0;
+    /* GPD médio do ciclo; o GPD do último período aparece em linha própria. */
+    var gpdGDay = cycleDays > 0 && currentWeightG > 0 && initialWeightG > 0
+      ? (currentWeightG - initialWeightG) / cycleDays
+      : 0;
+    var gpdLastPeriodGDay = latestBiometry ? toNumber(latestBiometry.gpdGDay) : 0;
 
-    var biomassGainKg =
-      currentBiomassKg -
-      initialBiomassKg;
+    var harvestedBiomassKg = movementSummary ? movementSummary.harvestedBiomassKg + movementSummary.transferredOutBiomassKg - movementSummary.transferredInBiomassKg : 0;
+    var biomassGainKg = currentBiomassKg + harvestedBiomassKg - initialBiomassKg;
 
-    var fcr = totalFeedKg > 0 && biomassGainKg > 0
-      ? totalFeedKg / biomassGainKg
+    var fcr = feedForFcrKg > 0 && biomassGainKg > 0
+      ? feedForFcrKg / biomassGainKg
       : latestBiometry && latestBiometry.fcrTotal > 0
         ? latestBiometry.fcrTotal
         : 0;
 
-    var survivalPercent =
-      (
-        initialQuantity > 0 &&
-        currentPopulation >= 0
-      )
-        ? (
-            currentPopulation /
-            initialQuantity
-          ) *
-          100
-        : 0;
+    var survivalPercent = window.FishMovementService
+      ? window.FishMovementService.survivalPercent(initialQuantity, currentPopulation, movementSummary)
+      : (initialQuantity > 0 ? currentPopulation / initialQuantity * 100 : 0);
 
     var targetWeightG =
       toNumber(
@@ -36556,6 +36960,12 @@
             gpdGDay,
             2
           ),
+        gpdLabel: "GPD médio do ciclo",
+        gpdLastPeriodGDay: round(gpdLastPeriodGDay, 2),
+        feedForFcrKg: round(feedForFcrKg, 3),
+        feedAfterLastBiometryKg: round(feedAfterLastBiometryKg, 3),
+        harvestedBiomassKg: round(harvestedBiomassKg, 2),
+        harvestedFish: movementSummary ? movementSummary.harvested : 0,
 
         fcr:
           round(
@@ -36902,17 +37312,31 @@
 (function () {
   "use strict";
 
+  /* CSV para Excel em português: separador ";" e vírgula decimal. */
   function csvValue(value) {
-    return '"' + String(value === null || value === undefined ? "" : value).replace(/"/g, '""') + '"';
+    var text = typeof value === "number" && Number.isFinite(value)
+      ? String(value).replace(".", ",")
+      : String(value === null || value === undefined ? "" : value);
+    return '"' + text.replace(/"/g, '""') + '"';
   }
 
   function toCsv(rows) {
     var list = Array.isArray(rows) ? rows : [];
     if (!list.length) return "";
     var keys = Object.keys(list[0]);
-    return [keys.map(csvValue).join(",")].concat(list.map(function (row) {
-      return keys.map(function (key) { return csvValue(row[key]); }).join(",");
-    })).join("\n");
+    return [keys.map(csvValue).join(";")].concat(list.map(function (row) {
+      return keys.map(function (key) { return csvValue(row[key]); }).join(";");
+    })).join("\r\n");
+  }
+
+  /* Números exibidos (pt-BR ou moeda) viram células numéricas no XLSX para que a soma funcione. */
+  function numericCellValue(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : null;
+    var text = String(value === null || value === undefined ? "" : value).trim().replace(/^R\$\s*/, "");
+    /* Texto exibido no relatório já está formatado em pt-BR: ponto é sempre milhar. */
+    if (!/^-?\d{1,3}(\.\d{3})*(,\d+)?$|^-?\d+(,\d+)?$/.test(text)) return null;
+    var parsed = Number(text.replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
   }
 
   function documentHtml(title, html) {
@@ -37004,7 +37428,12 @@
       var values = Array.isArray(row) ? row : [row];
       xml += '<row r="' + (rowIndex + 1) + '">';
       values.forEach(function (value, columnIndex) {
-        xml += '<c r="' + columnName(columnIndex) + (rowIndex + 1) + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
+        var numeric = numericCellValue(value);
+        if (numeric !== null) {
+          xml += '<c r="' + columnName(columnIndex) + (rowIndex + 1) + '" t="n"><v>' + numeric + "</v></c>";
+        } else {
+          xml += '<c r="' + columnName(columnIndex) + (rowIndex + 1) + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
+        }
       });
       xml += "</row>";
     });
@@ -37267,6 +37696,7 @@
   }
 
   window.RelatoriosExportService = {
+    numericCellValue: numericCellValue,
     toCsv: toCsv,
     toSpreadsheetRows: toSpreadsheetRows,
     createXlsx: createXlsx,
@@ -37369,13 +37799,18 @@
     ============================================================
   */
 
-  function toNumber(value) {
-    var number =
-      Number(value);
-
-    return Number.isFinite(number)
-      ? number
-      : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function formatNumber(
@@ -38187,7 +38622,7 @@
         )}
 
         ${summaryCard(
-          "GPD",
+          "GPD médio do ciclo",
           performance.gpdGDay !== 0
             ? formatNumber(
                 performance.gpdGDay,
@@ -38198,7 +38633,14 @@
         )}
 
         ${summaryCard(
-          "CAA",
+          "GPD do último período",
+          performance.gpdLastPeriodGDay
+            ? formatNumber(performance.gpdLastPeriodGDay, 2) + " g/dia"
+            : "-"
+        )}
+
+        ${summaryCard(
+          "CAA (até a última biometria)",
           performance.fcr > 0
             ? formatNumber(
                 performance.fcr,
@@ -38222,6 +38664,20 @@
             ? formatKg(
                 performance.totalFeedKg
               )
+            : "-"
+        )}
+
+        ${summaryCard(
+          "Ração após a última biometria",
+          performance.feedAfterLastBiometryKg > 0
+            ? formatKg(performance.feedAfterLastBiometryKg)
+            : "-"
+        )}
+
+        ${summaryCard(
+          "Peixes despescados / transferidos",
+          performance.harvestedFish
+            ? formatInteger(performance.harvestedFish) + " (" + formatKg(performance.harvestedBiomassKg) + ")"
             : "-"
         )}
 
@@ -39043,28 +39499,18 @@
     return false;
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(value, decimals) {
@@ -39305,6 +39751,9 @@
   }
 
   function normalizeFeedPhase(value) {
+    if (window.RacaoTecnicaService && typeof window.RacaoTecnicaService.normalizePhase === "function") {
+      return window.RacaoTecnicaService.normalizePhase(value);
+    }
     var text = normalizeSearch(value)
       .replace(/\s+/g, "_")
       .replace(/-/g, "_");
@@ -41247,6 +41696,9 @@
   }
 
   function normalizeFeedPhase(value) {
+    if (window.RacaoTecnicaService && typeof window.RacaoTecnicaService.normalizePhase === "function") {
+      return window.RacaoTecnicaService.normalizePhase(value);
+    }
     var text = normalizeSearch(value)
       .replace(/\s+/g, "_")
       .replace(/-/g, "_");
@@ -42943,28 +43395,18 @@
     return false;
   }
 
-  function toNumber(value) {
-    if (value === null || value === undefined || value === "") {
-      return 0;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
-    }
-
-    var text = String(value).trim().replace(/\s/g, "");
-
-    if (text.indexOf(",") >= 0 && text.indexOf(".") >= 0) {
-      text = text.replace(/\./g, "").replace(",", ".");
-    } else if (text.indexOf(",") >= 0) {
-      text = text.replace(",", ".");
-    } else if (/^\d{1,3}(\.\d{3})+$/.test(text)) {
-      text = text.replace(/\./g, "");
-    }
-
-    var number = Number(text);
-
-    return Number.isFinite(number) ? number : 0;
+  function toNumber(value, fallback) {
+    /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
+    var shared = typeof window !== "undefined" && window.AquaGestNumber;
+    if (shared) return shared.parse(value, fallback);
+    var fb = fallback === undefined ? 0 : fallback;
+    if (value === null || value === undefined || value === "") return fb;
+    if (typeof value === "number") return Number.isFinite(value) ? value : fb;
+    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    if (!text) return fb;
+    if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
+    var parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fb;
   }
 
   function round(value, decimals) {
@@ -44241,7 +44683,7 @@
 
         var normalized = normalizeTransactionRecordForOutput(transaction);
 
-        if (!isDateInsidePeriod(normalized.competenceDate || normalized.dueDate || normalized.settlementDate, period.startDate, period.endDate)) {
+        if (!opts.allPeriods && !isDateInsidePeriod(normalized.competenceDate || normalized.dueDate || normalized.settlementDate, period.startDate, period.endDate)) {
           return false;
         }
 
@@ -44455,11 +44897,18 @@
       includeInactive: false
     });
 
-    var transactions = await listFinancialTransactions({
-      startDate: period.startDate,
-      endDate: period.endDate,
-      includeVoided: false
+    /*
+      Cada número usa a sua própria data (avaliação técnica, item 9):
+      - recebido/pago: data de liquidação dentro do período (regime de caixa);
+      - a receber/a pagar: vencimento dentro do período;
+      - vencidos: todo lançamento em aberto com vencimento antes de hoje, sem limite de início;
+      - competência: visão separada, pela data de competência.
+    */
+    var allTransactions = await listFinancialTransactions({
+      includeVoided: false,
+      allPeriods: true
     });
+    var transactions = [];
 
     var summary = {
       startDate: period.startDate,
@@ -44477,7 +44926,7 @@
       overdueReceivable: 0,
       overduePayable: 0,
 
-      transactionCount: transactions.length,
+      transactionCount: 0,
       settledTransactionCount: 0,
       pendingTransactionCount: 0,
       overdueTransactionCount: 0
@@ -44487,36 +44936,43 @@
       summary.totalAccountBalance += toNumber(account.currentBalance);
     });
 
-    transactions.forEach(function (transaction) {
-      var amount = toNumber(transaction.amount);
-      var effectiveStatus = transaction.effectiveStatus;
+    summary.competenceIncome = 0;
+    summary.competenceExpense = 0;
 
-      if (transaction.transactionType === "income") {
-        if (transaction.status === "received") {
-          summary.settledIncome += amount;
-          summary.settledTransactionCount += 1;
-        } else if (effectiveStatus === "overdue") {
-          summary.overdueReceivable += amount;
-          summary.overdueTransactionCount += 1;
-        } else if (transaction.status === "pending") {
-          summary.pendingReceivable += amount;
-          summary.pendingTransactionCount += 1;
-        }
+    allTransactions.forEach(function (transaction) {
+      var amount = toNumber(transaction.amount);
+      var type = transaction.transactionType;
+      if (type !== "income" && type !== "expense") return;
+
+      var settled = isSettledTransaction(transaction);
+      var overdue = !settled && transaction.effectiveStatus === "overdue";
+      var settledInPeriod = settled && isDateInsidePeriod(transaction.settlementDate, period.startDate, period.endDate);
+      var dueInPeriod = !settled && !overdue && transaction.status === "pending" && isDateInsidePeriod(transaction.dueDate || transaction.competenceDate, period.startDate, period.endDate);
+      var competenceInPeriod = isDateInsidePeriod(transaction.competenceDate, period.startDate, period.endDate);
+
+      if (competenceInPeriod) {
+        if (type === "income") summary.competenceIncome += amount; else summary.competenceExpense += amount;
       }
 
-      if (transaction.transactionType === "expense") {
-        if (transaction.status === "paid") {
-          summary.settledExpense += amount;
-          summary.settledTransactionCount += 1;
-        } else if (effectiveStatus === "overdue") {
-          summary.overduePayable += amount;
-          summary.overdueTransactionCount += 1;
-        } else if (transaction.status === "pending") {
-          summary.pendingPayable += amount;
-          summary.pendingTransactionCount += 1;
-        }
+      if (!settledInPeriod && !dueInPeriod && !overdue) return;
+      transactions.push(transaction);
+
+      if (settledInPeriod) {
+        if (type === "income") summary.settledIncome += amount; else summary.settledExpense += amount;
+        summary.settledTransactionCount += 1;
+      } else if (overdue) {
+        if (type === "income") summary.overdueReceivable += amount; else summary.overduePayable += amount;
+        summary.overdueTransactionCount += 1;
+      } else if (dueInPeriod) {
+        if (type === "income") summary.pendingReceivable += amount; else summary.pendingPayable += amount;
+        summary.pendingTransactionCount += 1;
       }
     });
+
+    summary.transactionCount = transactions.length;
+    summary.competenceIncome = round(summary.competenceIncome, 2);
+    summary.competenceExpense = round(summary.competenceExpense, 2);
+    summary.competenceResult = round(summary.competenceIncome - summary.competenceExpense, 2);
 
     summary.totalAccountBalance = round(summary.totalAccountBalance, 2);
     summary.settledIncome = round(summary.settledIncome, 2);
@@ -47621,7 +48077,7 @@ function getIncomeCategoryOptionsHtml() {
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "aquagest-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+    link.download = "aquagest-backup-" + (function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })() + ".json";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -47633,7 +48089,7 @@ function getIncomeCategoryOptionsHtml() {
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "aquagest-lite-dados-ml-anonimos-" + new Date().toISOString().slice(0, 10) + ".json";
+    link.download = "aquagest-lite-dados-ml-anonimos-" + (function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })() + ".json";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -47793,7 +48249,7 @@ function getIncomeCategoryOptionsHtml() {
     } catch (e) { throw new Error("Senha incorreta ou arquivo corrompido."); }
   }
   async function shareOrDownload(env) {
-    var name = "aquagest-backup-" + new Date().toISOString().slice(0, 10) + ".aqbak";
+    var name = "aquagest-backup-" + (function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })() + ".aqbak";
     var file = new File([JSON.stringify(env)], name, { type: "application/json" });
     try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
     var a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -47888,7 +48344,7 @@ function getIncomeCategoryOptionsHtml() {
   "use strict";
   var root = typeof window !== "undefined" ? window : globalThis;
   /* Endereço HTTPS onde o app foi publicado (GitHub Pages). Vazio = sem botão. */
-  var OFFICIAL_URL = "";
+  var OFFICIAL_URL = "https://despertadoativo-blip.github.io/aquagest/";
   var STORES = [
     ["properties", "Propriedades"], ["ponds", "Viveiros"], ["production_cycles", "Lotes"],
     ["biometries", "Biometrias"], ["water_quality", "Qualidade da água"], ["feeding_records", "Arraçoamento"],
@@ -48762,6 +49218,29 @@ function getIncomeCategoryOptionsHtml() {
     }
   }
 
+  /*
+    Correção v21 (avaliação técnica): recalcula uma vez os lotes ativos
+    para regravar ração acumulada, CA e população com as regras corrigidas.
+  */
+  async function runDataCorrections() {
+    try {
+      var user = getCurrentUser();
+      if (!user || !window.PisciculturaService || !window.BiometriaService ||
+        typeof window.BiometriaService.rebuildAllActiveCycles !== "function") return;
+      var property = await window.PisciculturaService.getCurrentProperty();
+      if (!property || !property.id) return;
+      var key = "aq_correcao_v21_" + property.id;
+      var done = null;
+      try { done = localStorage.getItem(key); } catch (e) { done = null; }
+      if (done) return;
+      var count = await window.BiometriaService.rebuildAllActiveCycles(user.id);
+      try { localStorage.setItem(key, new Date().toISOString()); } catch (e) { /* sem storage */ }
+      if (count) console.info("[AquaGest Pro] Lotes recalculados após correção:", count);
+    } catch (error) {
+      console.warn("[AquaGest Pro] Recalculo dos lotes não concluído:", error);
+    }
+  }
+
   async function recoverPropertySession() {
     var user =
       getCurrentUser();
@@ -49394,6 +49873,7 @@ function getIncomeCategoryOptionsHtml() {
     initFeatureUIs();
 
     await recoverPropertySession();
+    await runDataCorrections();
 
     if (
       window.BackupService &&
@@ -50095,6 +50575,7 @@ function getIncomeCategoryOptionsHtml() {
     initFeatureUIs();
 
     await recoverPropertySession();
+    await runDataCorrections();
 
     if (
       window.BackupService &&

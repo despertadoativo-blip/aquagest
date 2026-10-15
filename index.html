@@ -1427,6 +1427,22 @@
                 </div>
 
                 <div>
+                  <label for="production_plannedCycleDays">
+                    Duração planejada do ciclo (dias)
+                  </label>
+
+                  <input
+                    id="production_plannedCycleDays"
+                    name="plannedCycleDays"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputmode="numeric"
+                    placeholder="180"
+                  />
+                </div>
+
+                <div>
                   <label for="production_initialBiomassKg">
                     Biomassa inicial
                   </label>
@@ -2026,7 +2042,7 @@
                   <input id="prediction_days" type="number" min="1" step="1" required />
                 </div>
                 <div>
-                  <label for="prediction_projectionDays">Dias para projeção</label>
+                  <label for="prediction_projectionDays">Dias para projeção (a partir do peso final)</label>
                   <input id="prediction_projectionDays" type="number" min="1" step="1" value="30" required />
                 </div>
                 <div>
@@ -2050,7 +2066,7 @@
             <div class="form-actions">
               <button id="predictionTrainBtn" class="secondary-btn" type="button">Treinar modelo local com biometrias</button>
             </div>
-            <p id="prediction_mlStatus" class="technical-note">O treinamento exige pelo menos oito observações consecutivas com dados de biometria.</p>
+            <p id="prediction_mlStatus" class="technical-note">O treinamento exige pelo menos 10 observações por variável (60 intervalos entre biometrias com temperatura).</p>
           </section>
         </section>
 
@@ -2295,6 +2311,7 @@
   
   
   
+  
 
   <!-- =====================================================
        AUTENTICAÇÃO
@@ -2323,6 +2340,8 @@
        PRODUÇÃO
   ====================================================== -->
 
+  
+  
   
   
 
