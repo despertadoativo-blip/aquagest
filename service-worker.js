@@ -25,7 +25,7 @@ const CACHE_PREFIX =
   "aquagestpro-";
 
 const CACHE_NAME =
-  "aquagestpro-producao-v21-avaliacao-tecnica";
+  "aquagestpro-producao-v24-fontes-programa-exportacao";
 
 /*
   ============================================================

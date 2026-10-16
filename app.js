@@ -4866,11 +4866,27 @@
 ;
 
 /* ===== js/core/technical-engine.js ===== */
-/* AquaGest Pro — motor técnico centralizado (SENAR + Furuya). */
+/*
+  AquaGest Pro — motor técnico centralizado.
+
+  Fontes (todas citadas na tela ao lado dos números):
+  - SENAR. Piscicultura: alimentação. Coleção SENAR 263. Brasília, 2019 (base: Kubitza, 2003).
+    Tabela de arraçoamento para tilápia em viveiro escavado (25–28 °C) e ajuste por temperatura.
+  - RODRIGUES, BERGAMIN e SANTOS (2013, p. 183), Tabela 3: manejo alimentar em pisciculturas
+    comerciais em viveiros escavados. Usada só onde o SENAR não tem dados (larvicultura e reprodução).
+  - EMERSON et al. (1975): NH3 não ionizada.
+  - JOBLING (2003) e LUGERT et al. (2016): coeficiente térmico de crescimento (TGC).
+  - Faixas de fase (alevinagem até 30 g, recria 30–250 g, engorda acima de 250 g): critério do produtor.
+*/
 (function () {
   "use strict";
 
   var DEFAULT_PLANNED_DAYS = 180;
+  var SOURCES = {
+    senar: "SENAR 2019",
+    rodrigues: "Rodrigues, Bergamin e Santos 2013",
+    produtor: "Critério do produtor"
+  };
 
   function n(v) {
     var shared = typeof window !== "undefined" && window.AquaGestNumber;
@@ -4906,27 +4922,28 @@
   }
 
   /*
-    Tabela ÚNICA de temperatura para arraçoamento de tilápia.
-    Usada por biometria, qualidade da água e arraçoamento.
+    Ajuste da ração pela temperatura da água — SENAR 2019 (tabela única do app).
+    Menos de 16 °C: não fornecer; 16–19 °C: 60%; 20–24 °C: 80%; 25–29 °C: 100%;
+    30–32 °C: 80%; mais de 32 °C: não fornecer.
   */
   var TEMPERATURE_TABLE = [
-    { below: 16, factor: 0, label: "Arraçoamento suspenso", message: "Temperatura abaixo de 16 °C. Suspender o fornecimento de ração." },
-    { below: 20, factor: 0.5, label: "Consumo muito reduzido", message: "Temperatura baixa. Usar cerca de 50% da recomendação base." },
-    { below: 25, factor: 0.8, label: "Consumo reduzido", message: "Temperatura abaixo do ideal. Usar cerca de 80% da recomendação base." },
-    { upTo: 30, factor: 1, label: "Faixa adequada", message: "Temperatura favorável para alimentação da tilápia." },
-    { upTo: 32, factor: 0.7, label: "Atenção por temperatura elevada", message: "Temperatura elevada. Usar cerca de 70% da recomendação base e observar o oxigênio dissolvido." }
+    { below: 16, factor: 0, label: "Não fornecer ração", message: "Água abaixo de 16 °C: não fornecer ração (SENAR 2019)." },
+    { below: 20, factor: 0.6, label: "Fornecer 60% da ração", message: "Água entre 16 e 19 °C: fornecer 60% da ração calculada (SENAR 2019)." },
+    { below: 25, factor: 0.8, label: "Fornecer 80% da ração", message: "Água entre 20 e 24 °C: fornecer 80% da ração calculada (SENAR 2019)." },
+    { below: 30, factor: 1, label: "Ração completa", message: "Água entre 25 e 29 °C: fornecer 100% da ração calculada (SENAR 2019)." },
+    { upTo: 32, factor: 0.8, label: "Fornecer 80% da ração", message: "Água entre 30 e 32 °C: fornecer 80% da ração calculada e acompanhar o oxigênio (SENAR 2019)." }
   ];
 
   function feedingTemperatureInfo(value) {
     var t = n(value);
-    if (t <= 0) return { factor: 1, label: "Temperatura não informada", message: "Percentual sem ajuste por temperatura." };
+    if (t <= 0) return { factor: 1, label: "Temperatura não informada", message: "Sem temperatura da água: ração sem ajuste.", source: "" };
     for (var i = 0; i < TEMPERATURE_TABLE.length; i += 1) {
       var row = TEMPERATURE_TABLE[i];
       if ((row.below !== undefined && t < row.below) || (row.upTo !== undefined && t <= row.upTo)) {
-        return { factor: row.factor, label: row.label, message: row.message };
+        return { factor: row.factor, label: row.label, message: row.message, source: SOURCES.senar };
       }
     }
-    return { factor: 0, label: "Arraçoamento suspenso", message: "Temperatura acima de 32 °C. Suspender a alimentação e monitorar o oxigênio dissolvido." };
+    return { factor: 0, label: "Não fornecer ração", message: "Água acima de 32 °C: não fornecer ração e acompanhar o oxigênio (SENAR 2019).", source: SOURCES.senar };
   }
 
   function feedingTemperatureFactor(value) {
@@ -4977,27 +4994,114 @@
     };
   }
 
-  /* Referência de proteína (Furuya). É informativa: não substitui a faixa mínima/máxima da tabela nutricional. */
-  var FEED_PROFILES = [
-    { phase: "larvas_alevinos", phaseLabel: "Larvas e alevinos (até 30 g)", minWeightG: 0, maxWeightG: 30, crudeProteinPercent: 41.30, source: "Furuya" },
-    { phase: "juvenil_recria", phaseLabel: "Juvenil / recria (30 a 100 g)", minWeightG: 30, maxWeightG: 100, crudeProteinPercent: 29.73, source: "Furuya" },
-    { phase: "terminacao", phaseLabel: "Terminação (acima de 100 g)", minWeightG: 100, maxWeightG: 999999, crudeProteinPercent: 26.80, source: "Furuya" }
-  ];
+  /*
+    TABELA ÚNICA DE MANEJO ALIMENTAR DA TILÁPIA, por faixa de peso.
+    Faixa: inclui o peso inicial e exclui o final (um peixe de 5 g está na faixa de 5 a 10 g).
+    - percent / meals / pellet / fcr / proteinReference: SENAR 2019 (viveiro escavado, 25–28 °C).
+    - Larvicultura (< 1 g): Rodrigues, Bergamin e Santos (2013) — até saciedade aparente, até 10 tratos,
+      55–40% PB, ração farelada e alimento vivo.
+    - Faixa aceitável de PB (proteinMin–proteinMax): faixa de Rodrigues (2013) da fase
+      (alevinagem 40–55%, recria 32–40%, engorda 28–32%), ampliada para incluir o valor do SENAR
+      quando ele fica fora (30–50 g: SENAR 42% → 32–42%).
+    - Acima de 1.800 g: o SENAR não tem faixa; o app não recomenda % do peso vivo (o produtor informa).
+  */
+  var PHASES = {
+    larvas_alevinos: { label: "Larvicultura e alevinagem (até 30 g)", short: "Alevinagem" },
+    juvenil_recria: { label: "Recria (30 a 250 g)", short: "Recria" },
+    terminacao: { label: "Engorda (acima de 250 g)", short: "Engorda" }
+  };
 
-  function feedProfile(weight) {
-    weight = n(weight);
-    return FEED_PROFILES.find(function (p) { return weight >= p.minWeightG && weight < p.maxWeightG; }) || FEED_PROFILES[2];
+  var FEEDING_TABLE = [
+    { min: 0, max: 1, phase: "larvas_alevinos", stage: "Larvicultura e reversão", percent: null, percentText: "até saciedade aparente", meals: 10, mealsText: "até 10", proteinMin: 40, proteinMax: 55, proteinReference: null, pelletMin: null, pelletMax: null, pelletText: "farelada (pó) e alimento vivo", powder: true, fcr: null, source: SOURCES.rodrigues },
+    { min: 1, max: 5, phase: "larvas_alevinos", stage: "Alevinagem", percent: 14, meals: 5, proteinMin: 40, proteinMax: 55, proteinReference: 42, pelletMin: null, pelletMax: null, pelletText: "farelada (pó)", powder: true, fcr: 1.0, source: SOURCES.senar },
+    { min: 5, max: 10, phase: "larvas_alevinos", stage: "Alevinagem", percent: 8, meals: 4, proteinMin: 40, proteinMax: 55, proteinReference: 42, pelletMin: 2, pelletMax: 3, fcr: 1.0, source: SOURCES.senar },
+    { min: 10, max: 20, phase: "larvas_alevinos", stage: "Alevinagem", percent: 5, meals: 3, proteinMin: 40, proteinMax: 55, proteinReference: 42, pelletMin: 2, pelletMax: 3, fcr: 1.1, source: SOURCES.senar },
+    { min: 20, max: 30, phase: "larvas_alevinos", stage: "Alevinagem", percent: 4.5, meals: 3, proteinMin: 40, proteinMax: 55, proteinReference: 42, pelletMin: 2, pelletMax: 3, fcr: 1.1, source: SOURCES.senar },
+    { min: 30, max: 50, phase: "juvenil_recria", stage: "Recria", percent: 4.5, meals: 3, proteinMin: 32, proteinMax: 42, proteinReference: 42, pelletMin: 2, pelletMax: 3, fcr: 1.1, source: SOURCES.senar },
+    { min: 50, max: 150, phase: "juvenil_recria", stage: "Recria", percent: 3.4, meals: 3, proteinMin: 32, proteinMax: 40, proteinReference: 36, pelletMin: 3, pelletMax: 4, fcr: 1.2, source: SOURCES.senar },
+    { min: 150, max: 250, phase: "juvenil_recria", stage: "Recria", percent: 3.0, meals: 3, proteinMin: 32, proteinMax: 40, proteinReference: 32, pelletMin: 4, pelletMax: 6, fcr: 1.3, source: SOURCES.senar },
+    { min: 250, max: 400, phase: "terminacao", stage: "Engorda", percent: 2.2, meals: 2, proteinMin: 28, proteinMax: 32, proteinReference: null, pelletMin: 4, pelletMax: 6, fcr: 1.4, source: SOURCES.senar },
+    { min: 400, max: 600, phase: "terminacao", stage: "Engorda", percent: 1.4, meals: 2, proteinMin: 28, proteinMax: 32, proteinReference: null, pelletMin: 4, pelletMax: 6, fcr: 1.6, source: SOURCES.senar },
+    { min: 600, max: 800, phase: "terminacao", stage: "Engorda", percent: 1.0, meals: 2, proteinMin: 28, proteinMax: 32, proteinReference: null, pelletMin: 4, pelletMax: 6, fcr: 1.7, source: SOURCES.senar },
+    { min: 800, max: 1300, phase: "terminacao", stage: "Engorda", percent: 0.8, meals: 2, proteinMin: 28, proteinMax: 32, proteinReference: null, pelletMin: 6, pelletMax: 8, fcr: 1.8, source: SOURCES.senar },
+    { min: 1300, max: 1800, phase: "terminacao", stage: "Engorda", percent: 0.6, meals: 2, proteinMin: 28, proteinMax: 32, proteinReference: null, pelletMin: 6, pelletMax: 8, fcr: 2.0, source: SOURCES.senar },
+    { min: 1800, max: Infinity, phase: "terminacao", stage: "Engorda", percent: null, percentText: "fora da tabela do SENAR (informe o % usado)", meals: 2, proteinMin: 28, proteinMax: 32, proteinReference: null, pelletMin: null, pelletMax: null, pelletText: "não informado pela fonte", fcr: null, source: SOURCES.rodrigues }
+  ].map(function (row) {
+    row.phaseLabel = PHASES[row.phase].label;
+    row.weightLabel = row.max === Infinity ? "acima de 1.800 g" : (row.min === 0 ? "abaixo de 1 g" : fmtG(row.min) + " a " + fmtG(row.max) + " g");
+    if (row.percentText === undefined) row.percentText = String(row.percent).replace(".", ",") + "% do peso vivo";
+    if (row.mealsText === undefined) row.mealsText = String(row.meals);
+    if (row.pelletText === undefined) row.pelletText = row.pelletMin + " a " + row.pelletMax + " mm";
+    row.proteinText = row.proteinMin + "% a " + row.proteinMax + "%" + (row.proteinReference ? " (SENAR: " + row.proteinReference + "%)" : "");
+    return Object.freeze(row);
+  });
+
+  /* 1300 → "1.300" (milhar com ponto, como o produtor escreve). */
+  function fmtG(v) { return String(v).replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
+
+  function feedingBand(weightG) {
+    var w = n(weightG);
+    if (!(w > 0)) return null;
+    for (var i = 0; i < FEEDING_TABLE.length; i += 1) {
+      if (w >= FEEDING_TABLE[i].min && w < FEEDING_TABLE[i].max) return FEEDING_TABLE[i];
+    }
+    return FEEDING_TABLE[FEEDING_TABLE.length - 1];
   }
 
-  function harvestProjection(startDate, currentDate, averageWeight, targetWeight, gpd, plannedDays) {
+  function phaseForWeight(weightG) {
+    var band = feedingBand(weightG);
+    return band ? band.phase : "";
+  }
+
+  /*
+    Ração projetada até o peso-alvo: a CA esperada do SENAR é aplicada ao ganho de peso
+    dentro de cada faixa (leitura direta da coluna "TCA esperada" por faixa).
+    Retorna feedKg = null se alguma faixa do caminho não tiver CA na fonte.
+  */
+  function projectedFeedByBands(population, fromWeightG, toWeightG) {
+    var pop = n(population), from = n(fromWeightG), to = n(toWeightG);
+    var result = { feedKg: 0, gainKg: 0, fcr: 0, complete: true, bands: [] };
+    if (!(pop > 0) || !(to > from) || !(from > 0)) return result;
+    FEEDING_TABLE.forEach(function (band) {
+      var lo = Math.max(from, band.min), hi = Math.min(to, band.max);
+      if (hi <= lo) return;
+      var gainKg = pop * (hi - lo) / 1000;
+      if (band.fcr === null) { result.complete = false; return; }
+      result.feedKg += gainKg * band.fcr;
+      result.gainKg += gainKg;
+      result.bands.push({ weightLabel: band.weightLabel, gainKg: gainKg, fcr: band.fcr, feedKg: gainKg * band.fcr });
+    });
+    result.fcr = result.gainKg > 0 ? result.feedKg / result.gainKg : 0;
+    if (!result.complete) result.feedKg = null;
+    return result;
+  }
+
+  /* TGC (Jobling 2003): ((Wf^1/3 − Wi^1/3) ÷ graus-dia) × 1000. */
+  function tgcFromDegreeDays(initialWeightG, finalWeightG, degreeDays) {
+    var wi = n(initialWeightG), wf = n(finalWeightG), dd = n(degreeDays);
+    if (!(wi > 0) || !(wf > wi) || !(dd > 0)) return 0;
+    return (Math.cbrt(wf) - Math.cbrt(wi)) / dd * 1000;
+  }
+
+  /* Dias até o peso-alvo pelo TGC, à temperatura média informada. */
+  function tgcDaysToTarget(currentWeightG, targetWeightG, tgc, temperatureC) {
+    var w = n(currentWeightG), wt = n(targetWeightG), k = n(tgc), t = n(temperatureC);
+    if (!(w > 0) || !(wt > w) || !(k > 0) || !(t > 0)) return 0;
+    return Math.ceil((Math.cbrt(wt) - Math.cbrt(w)) * 1000 / (k * t));
+  }
+
+  function harvestProjection(startDate, currentDate, averageWeight, targetWeight, gpd, plannedDays, daysToTargetOverride) {
     var cycleDays = n(plannedDays) > 0 ? Math.round(n(plannedDays)) : DEFAULT_PLANNED_DAYS;
     var planned = addDays(startDate, cycleDays);
     var remaining = Math.max(0, n(targetWeight) - n(averageWeight));
-    var days = n(gpd) > 0 && remaining > 0 ? Math.ceil(remaining / n(gpd)) : 0;
+    var days = n(daysToTargetOverride) > 0
+      ? Math.round(n(daysToTargetOverride))
+      : (n(gpd) > 0 && remaining > 0 ? Math.ceil(remaining / n(gpd)) : 0);
     var projected = currentDate && days ? addDays(currentDate, days) : "";
     var compatible = !planned || !projected || projected <= planned;
     return {
       plannedCycleDays: cycleDays,
+      plannedCycleDaysInformed: n(plannedDays) > 0,
       plannedHarvestDate: planned,
       performanceProjectedHarvestDate: projected,
       projectedDaysToTarget: days,
@@ -5007,15 +5111,21 @@
   }
 
   window.TechnicalEngine = {
-    version: "v9-avaliacao-tecnica",
+    version: "v10-fontes-senar-rodrigues",
+    sources: SOURCES,
     constants: { plannedCycleDays: DEFAULT_PLANNED_DAYS, nh3CriticalMgL: 0.2, nitriteManagementMgL: 0.3 },
     calculateNH3: calculateNH3,
     feedingTemperatureFactor: feedingTemperatureFactor,
     feedingTemperatureInfo: feedingTemperatureInfo,
     temperatureTable: TEMPERATURE_TABLE,
     classifyWater: classifyWater,
-    feedProfiles: FEED_PROFILES,
-    feedProfile: feedProfile,
+    phases: PHASES,
+    feedingTable: FEEDING_TABLE,
+    feedingBand: feedingBand,
+    phaseForWeight: phaseForWeight,
+    projectedFeedByBands: projectedFeedByBands,
+    tgcFromDegreeDays: tgcFromDegreeDays,
+    tgcDaysToTarget: tgcDaysToTarget,
     harvestProjection: harvestProjection,
     localIsoDate: localIso
   };
@@ -6266,7 +6376,9 @@
   var FREE_SCREENS_WITHOUT_PROPERTY = [
     "dashboard",
     "piscicultura",
-    "configuracoes"
+    "configuracoes",
+    /* Calculadora de aeração: funciona sem piscicultura cadastrada (área digitada). */
+    "dimensionamento"
   ];
 
   var PUBLIC_SCREENS = [
@@ -10684,6 +10796,10 @@
     ============================================================
   */
 
+  function isAreaBasedStructure(value) {
+    return normalizeStructureType(value) === "Viveiro escavado";
+  }
+
   function normalizeStructureType(value) {
     var text =
       normalizeText(value);
@@ -10839,6 +10955,22 @@
           )
         ),
 
+      /*
+        Viveiro escavado: capacidade por ÁREA (kg/m²).
+        Tanque-rede, raceway e geomembrana: por VOLUME (kg/m³).
+      */
+      maxDensityKgM2:
+        toNonNegativeNumber(
+          firstValue(
+            input,
+            [
+              "maxDensityKgM2",
+              "pond_maxDensityKgM2"
+            ],
+            0
+          )
+        ),
+
       status:
         normalizeStatus(
           firstValue(
@@ -10944,6 +11076,17 @@
         input.averageDepthM;
     }
 
+    var densityBasis = isAreaBasedStructure(input.structureType) ? "area" : "volume";
+    var maxDensityKgM2 = 0;
+
+    if (densityBasis === "area" && input.maxDensityKgM2 > 0) {
+      /* Informado em kg/m²: o equivalente em kg/m³ é mantido para os demais módulos. */
+      maxDensityKgM2 = input.maxDensityKgM2;
+      input.maxDensityKgM3 = input.averageDepthM > 0 ? maxDensityKgM2 / input.averageDepthM : 0;
+    } else if (input.maxDensityKgM3 > 0 && input.averageDepthM > 0) {
+      maxDensityKgM2 = input.maxDensityKgM3 * input.averageDepthM;
+    }
+
     if (
       volumeM3 > 0 &&
       input.maxDensityKgM3 > 0
@@ -10987,8 +11130,17 @@
       maxDensityKgM3:
         round(
           input.maxDensityKgM3,
-          2
+          4
         ),
+
+      maxDensityKgM2:
+        round(
+          maxDensityKgM2,
+          3
+        ),
+
+      densityBasis:
+        densityBasis,
 
       volumeM3:
         round(
@@ -11410,7 +11562,7 @@
       metrics.maxDensityKgM3 <= 0
     ) {
       throw new Error(
-        "Informe a densidade máxima recomendada em kg/m³."
+        "Informe a capacidade máxima: kg/m² para viveiro escavado ou kg/m³ para tanque-rede, raceway e geomembrana."
       );
     }
 
@@ -11470,6 +11622,12 @@
 
       maxDensityKgM3:
         metrics.maxDensityKgM3,
+
+      maxDensityKgM2:
+        metrics.maxDensityKgM2,
+
+      densityBasis:
+        metrics.densityBasis,
 
       volumeM3:
         metrics.volumeM3,
@@ -12325,6 +12483,9 @@
     calculatePondMetrics:
       calculatePondMetrics,
 
+    isAreaBasedStructure:
+      isAreaBasedStructure,
+
     listPonds:
       listPonds,
 
@@ -12492,6 +12653,41 @@
       option.textContent = value;
       selectElement.appendChild(option);
     }
+  }
+
+  /* Viveiro escavado: capacidade por área (kg/m²). Demais estruturas: por volume (kg/m³). */
+  function isAreaBased(structureType) {
+    if (window.ViveirosService && typeof window.ViveirosService.isAreaBasedStructure === "function") {
+      return window.ViveirosService.isAreaBasedStructure(structureType);
+    }
+    return String(structureType || "").toLowerCase().indexOf("escavado") >= 0;
+  }
+
+  function applyDensityUnit(values) {
+    if (isAreaBased(values.structureType)) {
+      values.maxDensityKgM2 = values.maxDensityKgM3;
+      delete values.maxDensityKgM3;
+    }
+    return values;
+  }
+
+  function updateDensityLabel() {
+    var label = document.querySelector('label[for="pond_maxDensityKgM3"]');
+    var type = getElement("pond_structureType") ? getElement("pond_structureType").value : "";
+    if (label) {
+      label.textContent = isAreaBased(type)
+        ? "Capacidade máxima por área (kg/m²)"
+        : "Densidade máxima recomendada (kg/m³)";
+    }
+    if (typeof updateCalculatedFields === "function") updateCalculatedFields();
+  }
+
+  function formatPondCapacity(pond) {
+    if (isAreaBased(pond.structureType)) {
+      var kgM2 = Number(pond.maxDensityKgM2) > 0 ? Number(pond.maxDensityKgM2) : Number(pond.maxDensityKgM3 || 0) * Number(pond.averageDepthM || 0);
+      return formatNumber(kgM2, 2) + " kg/m²";
+    }
+    return formatDensity(pond.maxDensityKgM3, 2);
   }
 
   function getFormValues(form) {
@@ -12688,6 +12884,7 @@
 
     if (canReplace) {
       setStructureTypeValue(suggested);
+      updateDensityLabel();
     }
   }
 
@@ -12724,12 +12921,13 @@
   }
 
   function getCalculationInput() {
-    return {
+    return applyDensityUnit({
+      structureType: getElement("pond_structureType") ? getElement("pond_structureType").value : "",
       areaM2: getElement("pond_areaM2") ? getElement("pond_areaM2").value : "",
       averageDepthM: getElement("pond_averageDepthM") ? getElement("pond_averageDepthM").value : "",
       maxDensityKgM3: getElement("pond_maxDensityKgM3") ? getElement("pond_maxDensityKgM3").value : "",
       aerationPowerHp: getElement("pond_aerationPowerHp") ? getElement("pond_aerationPowerHp").value : ""
-    };
+    });
   }
 
   function updateCalculatedFields() {
@@ -12771,6 +12969,7 @@
 
     structureTypeManuallyEdited = false;
     applySuggestedStructureType();
+    updateDensityLabel();
   }
 
   function fillForm(pond) {
@@ -12784,7 +12983,12 @@
     setValue("pond_structureType", pond.structureType || "");
     setValue("pond_areaM2", pond.areaM2 || "");
     setValue("pond_averageDepthM", pond.averageDepthM || "");
-    setValue("pond_maxDensityKgM3", pond.maxDensityKgM3 || "");
+    if (isAreaBased(pond.structureType)) {
+      var areaCapacity = Number(pond.maxDensityKgM2) > 0 ? Number(pond.maxDensityKgM2) : Number(pond.maxDensityKgM3 || 0) * Number(pond.averageDepthM || 0);
+      setValue("pond_maxDensityKgM3", areaCapacity > 0 ? String(Math.round(areaCapacity * 1000) / 1000) : "");
+    } else {
+      setValue("pond_maxDensityKgM3", pond.maxDensityKgM3 || "");
+    }
     setValue("pond_status", pond.status || "active");
     setValue("pond_aeratorCount", pond.aeratorCount || "");
     setValue("pond_aerationPowerHp", pond.aerationPowerHp || "");
@@ -12792,6 +12996,7 @@
     setValue("pond_notes", pond.notes || "");
 
     structureTypeManuallyEdited = true;
+    updateDensityLabel();
 
     updateCalculatedFields();
 
@@ -12943,7 +13148,7 @@
 
           '<div class="pond-metric">' +
             '<strong>Capacidade de suporte</strong>' +
-            '<span>' + escapeHtml(formatDensity(pond.maxDensityKgM3, 2)) + '</span>' +
+            '<span>' + escapeHtml(formatPondCapacity(pond)) + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
@@ -13022,7 +13227,7 @@
 
       setText("pondSubmitText", "Salvando...");
 
-      var values = getFormValues(form);
+      var values = applyDensityUnit(getFormValues(form));
 
       await window.ViveirosService.savePond(values);
 
@@ -13134,6 +13339,8 @@
     if (!structureSelect) {
       return;
     }
+
+    structureSelect.addEventListener("change", updateDensityLabel);
 
     structureSelect.addEventListener("change", function () {
       if (applyingSuggestedStructureType) {
@@ -17690,6 +17897,7 @@
     var card = document.createElement("section");
     card.id = "mov_card";
     card.className = "page-card";
+    card.setAttribute("data-prod-tab", "mov");
     card.innerHTML =
       "<h3>Movimentação de peixes</h3>" +
       "<p class='technical-note'>Registre despesca parcial, transferências e mortalidade fora da biometria. A população, a sobrevivência e a conversão alimentar do lote são recalculadas automaticamente.</p>" +
@@ -17702,7 +17910,7 @@
       "<div class='form-group'><label for='mov_quantity'>Quantidade de peixes</label><input id='mov_quantity' type='text' inputmode='numeric' required></div>" +
       "<div class='form-group'><label for='mov_weight'>Peso médio (g)</label><input id='mov_weight' type='text' inputmode='decimal' placeholder='Necessário para despesca e transferência'></div>" +
       "<div class='form-group'><label for='mov_notes'>Observações</label><input id='mov_notes' type='text'></div>" +
-      "</div><div class='form-actions'><button type='submit' class='btn btn-primary'>Registrar movimentação</button> <span id='mov_msg'></span></div></form>" +
+      "</div><div class='form-actions'><button type='submit' class='primary-btn'>Registrar movimentação</button> <span id='mov_msg'></span></div></form>" +
       "<div id='mov_list' style='overflow-x:auto'></div>";
     screen.appendChild(card);
     get("mov_date").value = today();
@@ -17730,12 +17938,12 @@
     var items = await window.FishMovementService.list(select.value);
     var types = window.FishMovementService.TYPES;
     if (!items.length) { box.innerHTML = "<p class='technical-note'>Nenhuma movimentação registrada para este lote.</p>"; return; }
-    box.innerHTML = "<table><thead><tr><th>Data</th><th>Tipo</th><th>Peixes</th><th>Peso médio</th><th>Biomassa</th><th>Origem</th><th></th></tr></thead><tbody>" +
+    box.innerHTML = "<table class='data-table'><thead><tr><th>Data</th><th>Tipo</th><th>Peixes</th><th>Peso médio</th><th>Biomassa</th><th>Origem</th><th></th></tr></thead><tbody>" +
       items.map(function (m) {
         var t = types[window.FishMovementService.normalizeType(m.movementType)] || { label: m.movementType };
         return "<tr><td>" + esc(brDate(m.date)) + "</td><td>" + esc(t.label) + "</td><td>" + fmt(m.quantity) + "</td><td>" +
           (m.averageWeightG ? fmt(m.averageWeightG, 1) + " g" : "—") + "</td><td>" + fmt(window.FishMovementService.biomassOf(m), 2) + " kg</td><td>" +
-          esc(m.source === "sanidade" ? "Sanidade" : "Manual") + "</td><td><button type='button' class='btn btn-small' data-mov-del='" + esc(m.id) + "'>Excluir</button></td></tr>";
+          esc(m.source === "sanidade" ? "Sanidade" : "Manual") + "</td><td><button type='button' class='secondary-btn' data-mov-del='" + esc(m.id) + "'>Excluir</button></td></tr>";
       }).join("") + "</tbody></table>";
     Array.prototype.forEach.call(box.querySelectorAll("[data-mov-del]"), function (button) {
       button.addEventListener("click", async function () {
@@ -17788,6 +17996,711 @@
 
 ;
 
+/* ===== js/services/programa-alimentar-service.js ===== */
+/*
+  AquaGest Pro — Programa alimentar (planejamento semanal de ração e custo).
+
+  Base técnica (citada na tela):
+  - Crescimento semanal pelo TGC (Jobling 2003): W_fim = (W_início^(1/3) + TGC/1000 × T × 7)^3.
+    O TGC e a temperatura média são informados pelo produtor ou vêm das biometrias do lote.
+  - % do peso vivo, tratos, PB, granulometria e CA esperada: tabela única do motor técnico
+    (SENAR 2019; larvicultura por Rodrigues, Bergamin e Santos 2013).
+  - Ajuste pela temperatura da água: SENAR 2019.
+  Premissas do app (mostradas na tela): peso médio da semana = média entre início e fim;
+  mortalidade esperada informada pelo produtor e distribuída igualmente pelas semanas;
+  CA = ração ÷ ganho de biomassa (biomassa final − inicial).
+*/
+(function () {
+  "use strict";
+
+  var STORE = "production_cycles";
+  var MAX_WEEKS = 156;
+
+  function num(value) {
+    if (window.AquaGestNumber) return window.AquaGestNumber.parse(value);
+    var n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function r(value, d) { var f = Math.pow(10, d === undefined ? 2 : d); return Math.round((Number(value) || 0) * f) / f; }
+  function engine() { return window.TechnicalEngine; }
+  function addDays(iso, days) {
+    if (!iso) return "";
+    var d = new Date(String(iso).slice(0, 10) + "T12:00:00");
+    if (Number.isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + days);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function weightAfter(weightG, tgc, temperatureC, days) {
+    var w = Math.cbrt(weightG) + tgc / 1000 * temperatureC * days;
+    return w > 0 ? Math.pow(w, 3) : 0;
+  }
+
+  function validate(input) {
+    var errors = [];
+    if (!(input.quantity > 0)) errors.push("Informe o número de peixes.");
+    if (!(input.initialWeightG > 0)) errors.push("Informe o peso inicial (g).");
+    if (!(input.targetWeightG > input.initialWeightG)) errors.push("O peso de abate deve ser maior que o peso inicial.");
+    if (!(input.tgc > 0)) errors.push("Informe o TGC previsto (use o TGC do lote ou o seu histórico).");
+    if (!(input.temperatureC > 0)) errors.push("Informe a temperatura média prevista da água (°C).");
+    if (input.mortalityPercent < 0 || input.mortalityPercent >= 100) errors.push("A mortalidade esperada deve estar entre 0% e 99%.");
+    return errors;
+  }
+
+  function normalizeInput(data) {
+    var d = data || {};
+    return {
+      cycleId: d.cycleId || "",
+      startDate: String(d.startDate || "").slice(0, 10),
+      quantity: Math.round(num(d.quantity)),
+      initialWeightG: num(d.initialWeightG),
+      targetWeightG: num(d.targetWeightG),
+      tgc: num(d.tgc),
+      tgcSource: d.tgcSource || "Informado pelo produtor",
+      temperatureC: num(d.temperatureC),
+      mortalityPercent: num(d.mortalityPercent),
+      prices: {
+        larvas_alevinos: num(d.prices && d.prices.larvas_alevinos),
+        juvenil_recria: num(d.prices && d.prices.juvenil_recria),
+        terminacao: num(d.prices && d.prices.terminacao)
+      }
+    };
+  }
+
+  /*
+    Gera o programa semana a semana até o peso de abate.
+    Retorna { ok, errors, input, weeks[], summary, byPhase[], byFeed[], notes[] }.
+  */
+  function buildPlan(data) {
+    var input = normalizeInput(data);
+    var errors = validate(input);
+    var E = engine();
+    if (!E) errors.push("Motor técnico não carregado.");
+    if (errors.length) return { ok: false, errors: errors, input: input, weeks: [] };
+
+    /* 1) Pesos semanais pelo TGC. */
+    var weights = [input.initialWeightG];
+    var weekDays = [0];
+    while (weights[weights.length - 1] < input.targetWeightG && weights.length <= MAX_WEEKS) {
+      var current = weights[weights.length - 1];
+      var next = weightAfter(current, input.tgc, input.temperatureC, 7);
+      if (next >= input.targetWeightG) {
+        /* Última semana: só os dias necessários para chegar ao peso de abate. */
+        var daysNeeded = Math.ceil((Math.cbrt(input.targetWeightG) - Math.cbrt(current)) * 1000 / (input.tgc * input.temperatureC));
+        weekDays.push(Math.max(1, Math.min(7, daysNeeded)));
+        weights.push(input.targetWeightG);
+      } else {
+        weekDays.push(7);
+        weights.push(next);
+      }
+    }
+    var totalWeeks = weights.length - 1;
+    var reachedTarget = weights[weights.length - 1] >= input.targetWeightG;
+
+    var temperature = E.feedingTemperatureInfo(input.temperatureC);
+    var mortality = input.mortalityPercent / 100;
+    var initialBiomassKg = input.quantity * input.initialWeightG / 1000;
+    var feedCum = 0, costCum = 0, missingPercent = false, missingPrice = false;
+    var weeks = [];
+
+    for (var i = 1; i <= totalWeeks; i += 1) {
+      var wStart = weights[i - 1], wEnd = weights[i];
+      var meanW = (wStart + wEnd) / 2;
+      var popStart = input.quantity * (1 - mortality * (i - 1) / totalWeeks);
+      var popEnd = input.quantity * (1 - mortality * i / totalWeeks);
+      var popMean = (popStart + popEnd) / 2;
+      var band = E.feedingBand(meanW);
+      var hasPercent = band && band.percent !== null;
+      if (!hasPercent) missingPercent = true;
+      var biomassMeanKg = popMean * meanW / 1000;
+      var feedDayKg = hasPercent ? biomassMeanKg * band.percent / 100 * temperature.factor : 0;
+      var days = weekDays[i];
+      var feedWeekKg = feedDayKg * days;
+      feedCum += feedWeekKg;
+      var biomassStartKg = popStart * wStart / 1000;
+      var biomassEndKg = popEnd * wEnd / 1000;
+      var gainWeekKg = biomassEndKg - biomassStartKg;
+      var gainCumKg = biomassEndKg - initialBiomassKg;
+      var price = input.prices[band.phase] || 0;
+      if (!(price > 0)) missingPrice = true;
+      var costWeek = feedWeekKg * price;
+      costCum += costWeek;
+
+      weeks.push({
+        week: i,
+        days: days,
+        startDate: input.startDate ? addDays(input.startDate, (i - 1) * 7) : "",
+        phase: band.phase,
+        phaseLabel: E.phases[band.phase].short,
+        stage: band.stage,
+        weightStartG: r(wStart, 1),
+        weightEndG: r(wEnd, 1),
+        fishStart: Math.round(popStart),
+        fishEnd: Math.round(popEnd),
+        biomassEndKg: r(biomassEndKg, 1),
+        feedingPercent: hasPercent ? band.percent : null,
+        feedingPercentText: band.percentText,
+        temperatureFactor: temperature.factor,
+        feedDayKg: r(feedDayKg, 2),
+        meals: band.meals,
+        feedPerMealKg: band.meals > 0 ? r(feedDayKg / band.meals, 2) : 0,
+        feedWeekKg: r(feedWeekKg, 1),
+        feedCumKg: r(feedCum, 1),
+        fcrWeek: gainWeekKg > 0 && feedWeekKg > 0 ? r(feedWeekKg / gainWeekKg, 2) : null,
+        fcrCum: gainCumKg > 0 && feedCum > 0 ? r(feedCum / gainCumKg, 2) : null,
+        protein: band.proteinText,
+        pellet: band.pelletText,
+        pricePerKg: price,
+        costWeek: r(costWeek, 2),
+        costCum: r(costCum, 2),
+        source: band.source
+      });
+    }
+
+    var last = weeks[weeks.length - 1];
+    var finalBiomassKg = last ? last.biomassEndKg : 0;
+    var producedKg = finalBiomassKg - initialBiomassKg;
+
+    var phaseMap = {}, feedMap = {};
+    weeks.forEach(function (w) {
+      var p = phaseMap[w.phase] || (phaseMap[w.phase] = { phase: w.phase, label: E.phases[w.phase].label, weeks: 0, feedKg: 0, cost: 0 });
+      p.weeks += 1; p.feedKg += w.feedWeekKg; p.cost += w.costWeek;
+      var key = w.protein + " | " + w.pellet;
+      var f = feedMap[key] || (feedMap[key] = { protein: w.protein, pellet: w.pellet, weekFrom: w.week, weekTo: w.week, feedKg: 0, cost: 0 });
+      f.weekTo = w.week; f.feedKg += w.feedWeekKg; f.cost += w.costWeek;
+    });
+    var byPhase = ["larvas_alevinos", "juvenil_recria", "terminacao"].filter(function (k) { return phaseMap[k]; }).map(function (k) {
+      var p = phaseMap[k];
+      return { phase: k, label: p.label, weeks: p.weeks, feedKg: r(p.feedKg, 1), cost: r(p.cost, 2), costPercent: costCum > 0 ? r(p.cost / costCum * 100, 1) : 0 };
+    });
+    var byFeed = Object.keys(feedMap).map(function (k) {
+      var f = feedMap[k];
+      return { protein: f.protein, pellet: f.pellet, weeks: f.weekFrom === f.weekTo ? String(f.weekFrom) : f.weekFrom + " a " + f.weekTo, feedKg: r(f.feedKg, 1), cost: r(f.cost, 2) };
+    });
+
+    var notes = [];
+    if (!reachedTarget) notes.push("O peso de abate não foi alcançado em " + MAX_WEEKS + " semanas com o TGC e a temperatura informados.");
+    if (missingPercent) notes.push("Há semanas sem % do peso vivo na fonte (larvicultura abaixo de 1 g ou acima de 1.800 g): a ração dessas semanas não foi calculada.");
+    if (missingPrice) notes.push("Há fases sem preço da ração: o custo dessas semanas aparece como zero.");
+    if (temperature.factor < 1) notes.push(temperature.message);
+
+    var totalDays = weekDays.reduce(function (a, b) { return a + b; }, 0);
+    return {
+      ok: true,
+      errors: [],
+      input: input,
+      weeks: weeks,
+      byPhase: byPhase,
+      byFeed: byFeed,
+      notes: notes,
+      summary: {
+        weeks: totalWeeks,
+        days: totalDays,
+        endDate: input.startDate ? addDays(input.startDate, totalDays) : "",
+        finalWeightG: last ? last.weightEndG : 0,
+        finalFish: last ? last.fishEnd : 0,
+        finalBiomassKg: r(finalBiomassKg, 1),
+        producedKg: r(producedKg, 1),
+        feedKg: r(feedCum, 1),
+        fcr: producedKg > 0 && feedCum > 0 ? r(feedCum / producedKg, 2) : null,
+        cost: r(costCum, 2),
+        costPerKgProduced: producedKg > 0 ? r(costCum / producedKg, 2) : null,
+        temperatureFactor: temperature.factor,
+        temperatureMessage: temperature.message
+      }
+    };
+  }
+
+  /* Planejado no dia d desde o início (interpolação dentro da semana). */
+  function plannedAtDay(plan, day) {
+    if (!plan || !plan.ok || !plan.weeks.length) return null;
+    var input = plan.input;
+    var weight = Math.min(weightAfter(input.initialWeightG, input.tgc, input.temperatureC, Math.max(0, day)), input.targetWeightG);
+    var weekIndex = Math.min(plan.weeks.length, Math.floor(day / 7) + 1);
+    var previousCum = weekIndex > 1 ? plan.weeks[weekIndex - 2].feedCumKg : 0;
+    var current = plan.weeks[weekIndex - 1];
+    var fraction = current ? Math.max(0, Math.min(1, (day - (weekIndex - 1) * 7) / (current.days || 7))) : 0;
+    return { weightG: r(weight, 1), feedCumKg: r(previousCum + (current ? current.feedWeekKg * fraction : 0), 1) };
+  }
+
+  function daysBetween(a, b) {
+    var x = new Date(String(a).slice(0, 10) + "T12:00:00"), y = new Date(String(b).slice(0, 10) + "T12:00:00");
+    if (Number.isNaN(x.getTime()) || Number.isNaN(y.getTime())) return 0;
+    return Math.round((y - x) / 86400000);
+  }
+
+  /* Planejado × real a partir das biometrias do lote. */
+  function compareWithBiometries(plan, biometries) {
+    if (!plan || !plan.ok || !plan.input.startDate) return [];
+    return (biometries || []).filter(function (b) {
+      var status = String(b.status || "").toLowerCase();
+      return b.deleted !== true && status !== "voided" && status !== "deleted" && b.date >= plan.input.startDate;
+    }).sort(function (a, b) { return String(a.date).localeCompare(String(b.date)); }).map(function (b) {
+      var day = daysBetween(plan.input.startDate, b.date);
+      var planned = plannedAtDay(plan, day);
+      var realW = num(b.averageWeightG);
+      var realFeed = num(b.feedTotalKg);
+      return {
+        date: b.date, day: day,
+        plannedWeightG: planned.weightG, realWeightG: r(realW, 1),
+        weightDiffPercent: planned.weightG > 0 ? r((realW - planned.weightG) / planned.weightG * 100, 1) : null,
+        plannedFeedKg: planned.feedCumKg, realFeedKg: r(realFeed, 1),
+        realFcr: num(b.fcrTotal) > 0 ? r(num(b.fcrTotal), 2) : null
+      };
+    });
+  }
+
+  /* Linhas para Excel/CSV. Números como números. */
+  function exportSheets(plan, lotLabel) {
+    if (!plan || !plan.ok) return [];
+    var s = plan.summary, i = plan.input;
+    var weeks = [["Semana", "Dias", "Início", "Fase", "Peso início (g)", "Peso fim (g)", "Peixes (fim)", "Biomassa fim (kg)", "% PV/dia", "Ração/dia (kg)", "Tratos/dia", "Kg por trato", "Ração semana (kg)", "Ração acumulada (kg)", "CA semana", "CA acumulada", "PB", "Ração", "Preço (R$/kg)", "Custo semana (R$)", "Custo acumulado (R$)", "Fonte"]]
+      .concat(plan.weeks.map(function (w) {
+        return [w.week, w.days, w.startDate, w.phaseLabel, w.weightStartG, w.weightEndG, w.fishEnd, w.biomassEndKg, w.feedingPercent === null ? w.feedingPercentText : w.feedingPercent, w.feedDayKg, w.meals, w.feedPerMealKg, w.feedWeekKg, w.feedCumKg, w.fcrWeek === null ? "" : w.fcrWeek, w.fcrCum === null ? "" : w.fcrCum, w.protein, w.pellet, w.pricePerKg, w.costWeek, w.costCum, w.source];
+      }));
+    var phases = [["Fase", "Semanas", "Ração (kg)", "Custo (R$)", "% do custo"]].concat(plan.byPhase.map(function (p) { return [p.label, p.weeks, p.feedKg, p.cost, p.costPercent]; }));
+    var feeds = [["Proteína bruta", "Ração", "Semanas", "Ração (kg)", "Custo (R$)"]].concat(plan.byFeed.map(function (f) { return [f.protein, f.pellet, f.weeks, f.feedKg, f.cost]; }));
+    var premises = [["Item", "Valor"],
+      ["Lote", lotLabel || "Planejamento avulso"], ["Data de início", i.startDate], ["Peixes no início", i.quantity], ["Peso inicial (g)", i.initialWeightG], ["Peso de abate (g)", i.targetWeightG],
+      ["TGC", i.tgc], ["Origem do TGC", i.tgcSource], ["Temperatura média prevista (°C)", i.temperatureC], ["Ajuste da ração pela temperatura", s.temperatureMessage],
+      ["Mortalidade esperada no período (%)", i.mortalityPercent], ["Semanas", s.weeks], ["Biomassa final (kg)", s.finalBiomassKg], ["Biomassa produzida (kg)", s.producedKg],
+      ["Ração total (kg)", s.feedKg], ["CA final", s.fcr === null ? "" : s.fcr], ["Custo de ração (R$)", s.cost], ["Custo de ração por kg produzido (R$)", s.costPerKgProduced === null ? "" : s.costPerKgProduced],
+      ["Fontes", "TGC: Jobling (2003). % do PV, tratos, PB, granulometria, CA esperada e ajuste por temperatura: SENAR (2019), Coleção SENAR 263. Larvicultura: Rodrigues, Bergamin e Santos (2013)."],
+      ["Premissas do app", "Peso médio da semana = média entre início e fim; mortalidade distribuída igualmente pelas semanas; CA = ração ÷ (biomassa final − inicial)."]];
+    return [{ name: "Programa semanal", rows: weeks }, { name: "Custos por fase", rows: phases }, { name: "Por tipo de ração", rows: feeds }, { name: "Premissas e fontes", rows: premises }];
+  }
+
+  async function savePlan(cycleId, inputData) {
+    if (!window.database) throw new Error("Banco local não carregado.");
+    if (!cycleId) throw new Error("Selecione um lote para salvar o programa.");
+    var cycle = await window.database.get(STORE, cycleId);
+    if (!cycle) throw new Error("Lote não encontrado.");
+    cycle.feedingPlan = { input: normalizeInput(inputData), savedAt: new Date().toISOString() };
+    cycle.updatedAt = new Date().toISOString();
+    await window.database.put(STORE, cycle);
+    return cycle.feedingPlan;
+  }
+
+  async function loadPlan(cycleId) {
+    if (!window.database || !cycleId) return null;
+    var cycle = await window.database.get(STORE, cycleId);
+    return cycle && cycle.feedingPlan ? cycle.feedingPlan : null;
+  }
+
+  window.ProgramaAlimentarService = {
+    buildPlan: buildPlan,
+    plannedAtDay: plannedAtDay,
+    compareWithBiometries: compareWithBiometries,
+    exportSheets: exportSheets,
+    savePlan: savePlan,
+    loadPlan: loadPlan,
+    weightAfter: weightAfter
+  };
+})();
+
+;
+
+/* ===== js/ui/programa-alimentar-ui.js ===== */
+/*
+  AquaGest Pro — abas da tela Produção (Lotes · Movimentação · Programa alimentar)
+  e a interface do Programa alimentar.
+*/
+(function () {
+  "use strict";
+
+  var TAB_KEY = "aq_producao_tab";
+  var SUBTAB_KEY = "aq_programa_subtab";
+  var lastPlan = null;
+  var lots = [];
+
+  function get(id) { return document.getElementById(id); }
+  function value(id) { var el = get(id); return el ? el.value : ""; }
+  function setValue(id, v) { var el = get(id); if (el) el.value = v === null || v === undefined ? "" : v; }
+  function esc(s) { return String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function fmt(n, d) { return n === null || n === undefined || n === "" ? "—" : Number(n).toLocaleString("pt-BR", { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); }
+  function money(n) { return n === null || n === undefined ? "—" : "R$ " + fmt(n, 2); }
+  function brDate(iso) { var p = String(iso || "").slice(0, 10).split("-"); return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : (iso || "—"); }
+  function store(key, v) { try { if (v === undefined) return window.localStorage.getItem(key); window.localStorage.setItem(key, v); } catch (e) { return null; } return null; }
+  function msg(text, ok) { var el = get("pa_msg"); if (el) { el.textContent = text || ""; el.style.color = ok === false ? "var(--color-danger)" : ""; } }
+
+  /* ---------------- Abas da Produção ---------------- */
+
+  var TABS = [
+    { id: "lotes", label: "Lotes" },
+    { id: "mov", label: "Movimentação" },
+    { id: "programa", label: "Programa alimentar" }
+  ];
+
+  function buildTabs() {
+    var screen = get("screen-producao");
+    if (!screen || get("producaoTabs")) return !!screen;
+    var bar = document.createElement("div");
+    bar.id = "producaoTabs";
+    bar.className = "aq-tabs";
+    bar.setAttribute("role", "tablist");
+    bar.setAttribute("aria-label", "Seções da produção");
+    bar.innerHTML = TABS.map(function (t) {
+      return '<button type="button" class="aq-tab" role="tab" id="producaoTab-' + t.id + '" data-prod-tab-btn="' + t.id + '" aria-selected="false">' + esc(t.label) + "</button>";
+    }).join("");
+    screen.insertBefore(bar, screen.firstChild);
+    bar.addEventListener("click", function (event) {
+      var btn = event.target.closest && event.target.closest("[data-prod-tab-btn]");
+      if (btn) selectTab(btn.getAttribute("data-prod-tab-btn"));
+    });
+    selectTab(store(TAB_KEY) || "lotes");
+    return true;
+  }
+
+  function selectTab(tab) {
+    var screen = get("screen-producao");
+    if (!screen) return;
+    if (!TABS.some(function (t) { return t.id === tab; })) tab = "lotes";
+    screen.setAttribute("data-active-tab", tab);
+    Array.prototype.forEach.call(screen.querySelectorAll("[data-prod-tab-btn]"), function (b) {
+      b.setAttribute("aria-selected", b.getAttribute("data-prod-tab-btn") === tab ? "true" : "false");
+    });
+    store(TAB_KEY, tab);
+    if (tab === "mov" && window.MovimentacaoUI && typeof window.MovimentacaoUI.refresh === "function") window.MovimentacaoUI.refresh();
+    if (tab === "programa") refreshLots();
+  }
+
+  /* ---------------- Programa alimentar ---------------- */
+
+  function field(id, label, attrs, hint) {
+    return '<div><label for="' + id + '">' + esc(label) + '</label><input id="' + id + '" ' + (attrs || 'type="text" inputmode="decimal"') + ' />' + (hint ? '<small class="technical-note">' + esc(hint) + "</small>" : "") + "</div>";
+  }
+
+  function buildCard() {
+    var screen = get("screen-producao");
+    if (!screen || get("pa_card")) return !!get("pa_card");
+    var card = document.createElement("section");
+    card.id = "pa_card";
+    card.className = "page-card";
+    card.setAttribute("data-prod-tab", "programa");
+    card.innerHTML =
+      '<div class="toolbar"><div class="toolbar-title"><h3>Programa alimentar</h3>' +
+      "<span>Planejamento semana a semana de ração e custo até o abate, com a fonte de cada número.</span></div></div>" +
+      '<form id="pa_form" class="form" novalidate>' +
+      '<div class="form-grid">' +
+      '<div><label for="pa_cycleId">Lote</label><select id="pa_cycleId"><option value="">Planejamento avulso (sem lote)</option></select></div>' +
+      '<div class="pa-fill-wrap"><label>&nbsp;</label><button type="button" id="pa_fill" class="secondary-btn">Preencher com os dados do lote</button></div>' +
+      field("pa_startDate", "Data de início", 'type="date"') +
+      field("pa_quantity", "Número de peixes", 'type="text" inputmode="numeric"') +
+      field("pa_initialWeightG", "Peso médio inicial (g)") +
+      field("pa_targetWeightG", "Peso de abate (g)", 'type="text" inputmode="decimal"', "Na engorda, o abate costuma ficar entre 1 e 1,5 kg.") +
+      field("pa_tgc", "TGC previsto", 'type="text" inputmode="decimal"', "Use o TGC do lote (preenchido pelas biometrias) ou o do seu histórico.") +
+      field("pa_temperatureC", "Temperatura média prevista da água (°C)") +
+      field("pa_mortalityPercent", "Mortalidade esperada no período (%)", 'type="text" inputmode="decimal"', "Informada pelo produtor; o app não tem fonte para um valor padrão.") +
+      field("pa_price_larvas_alevinos", "Preço da ração — alevinagem (R$/kg)") +
+      field("pa_price_juvenil_recria", "Preço da ração — recria (R$/kg)") +
+      field("pa_price_terminacao", "Preço da ração — engorda (R$/kg)") +
+      "</div>" +
+      '<div class="form-actions pa-actions">' +
+      '<button type="submit" class="primary-btn">Gerar programa</button>' +
+      '<button type="button" id="pa_prices" class="secondary-btn">Usar custo médio do estoque</button>' +
+      '<button type="button" id="pa_save" class="secondary-btn">Salvar no lote</button>' +
+      '<button type="button" id="pa_xlsx" class="secondary-btn">Excel</button>' +
+      '<button type="button" id="pa_csv" class="secondary-btn">CSV</button>' +
+      '</div><p id="pa_msg" class="technical-note" role="status" aria-live="polite"></p></form>' +
+      '<div id="pa_result" hidden>' +
+      '<div class="status-grid pa-summary" id="pa_summary"></div>' +
+      '<div class="aq-tabs aq-subtabs" role="tablist" aria-label="Visões do programa">' +
+      '<button type="button" class="aq-tab" role="tab" data-pa-sub="plan" aria-selected="true">Planejamento</button>' +
+      '<button type="button" class="aq-tab" role="tab" data-pa-sub="cost" aria-selected="false">Custos</button>' +
+      '<button type="button" class="aq-tab" role="tab" data-pa-sub="real" aria-selected="false">Planejado × real</button>' +
+      "</div>" +
+      '<div id="pa_panel_plan" class="pa-panel"></div>' +
+      '<div id="pa_panel_cost" class="pa-panel" hidden></div>' +
+      '<div id="pa_panel_real" class="pa-panel" hidden></div>' +
+      '<div id="pa_notes"></div>' +
+      '<p class="technical-note"><strong>Fontes:</strong> crescimento semanal pelo TGC (Jobling, 2003); % do peso vivo, tratos, proteína, granulometria, CA esperada e ajuste pela temperatura da água: SENAR (2019), Coleção SENAR 263, para tilápia em viveiro escavado; larvicultura: Rodrigues, Bergamin e Santos (2013). ' +
+      "<strong>Premissas do app:</strong> peso médio da semana = média entre o início e o fim; mortalidade distribuída igualmente pelas semanas; CA = ração ÷ (biomassa final − biomassa inicial).</p>" +
+      "</div>";
+    screen.appendChild(card);
+
+    get("pa_form").addEventListener("submit", function (event) { event.preventDefault(); generate(); });
+    get("pa_fill").addEventListener("click", fillFromLot);
+    get("pa_prices").addEventListener("click", fillPricesFromStock);
+    get("pa_save").addEventListener("click", saveToLot);
+    get("pa_xlsx").addEventListener("click", function () { exportPlan("xlsx"); });
+    get("pa_csv").addEventListener("click", function () { exportPlan("csv"); });
+    get("pa_cycleId").addEventListener("change", loadSavedPlan);
+    card.querySelector(".aq-subtabs").addEventListener("click", function (event) {
+      var btn = event.target.closest && event.target.closest("[data-pa-sub]");
+      if (btn) selectSubTab(btn.getAttribute("data-pa-sub"));
+    });
+    return true;
+  }
+
+  function selectSubTab(sub) {
+    ["plan", "cost", "real"].forEach(function (k) {
+      var panel = get("pa_panel_" + k);
+      if (panel) panel.hidden = k !== sub;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pa-sub]"), function (b) {
+      b.setAttribute("aria-selected", b.getAttribute("data-pa-sub") === sub ? "true" : "false");
+    });
+    store(SUBTAB_KEY, sub);
+  }
+
+  async function refreshLots() {
+    if (!buildCard()) return;
+    var select = get("pa_cycleId");
+    var current = select.value;
+    try {
+      lots = window.BiometriaService && typeof window.BiometriaService.listActiveLotsForBiometry === "function"
+        ? (await window.BiometriaService.listActiveLotsForBiometry()) || []
+        : [];
+    } catch (e) { lots = []; }
+    select.innerHTML = '<option value="">Planejamento avulso (sem lote)</option>' + lots.map(function (l) {
+      return '<option value="' + esc(l.cycleId) + '">' + esc(l.label || l.pondName || l.cycleId) + "</option>";
+    }).join("");
+    if (current) select.value = current;
+  }
+
+  function currentInput() {
+    return {
+      cycleId: value("pa_cycleId"),
+      startDate: value("pa_startDate"),
+      quantity: value("pa_quantity"),
+      initialWeightG: value("pa_initialWeightG"),
+      targetWeightG: value("pa_targetWeightG"),
+      tgc: value("pa_tgc"),
+      tgcSource: (get("pa_tgc") && get("pa_tgc").getAttribute("data-source")) || "Informado pelo produtor",
+      temperatureC: value("pa_temperatureC"),
+      mortalityPercent: value("pa_mortalityPercent"),
+      prices: {
+        larvas_alevinos: value("pa_price_larvas_alevinos"),
+        juvenil_recria: value("pa_price_juvenil_recria"),
+        terminacao: value("pa_price_terminacao")
+      }
+    };
+  }
+
+  /* Números exibidos no padrão brasileiro (vírgula decimal) para não confundir com milhar. */
+  function br(v) {
+    if (v === null || v === undefined || v === "") return "";
+    var n = typeof v === "number" ? v : (window.AquaGestNumber ? window.AquaGestNumber.parse(v) : Number(v));
+    if (!Number.isFinite(n)) return String(v);
+    return String(Math.round(n * 1000) / 1000).replace(".", ",");
+  }
+
+  function applyInput(input) {
+    if (!input) return;
+    setValue("pa_startDate", input.startDate);
+    setValue("pa_quantity", br(input.quantity));
+    setValue("pa_initialWeightG", br(input.initialWeightG));
+    setValue("pa_targetWeightG", br(input.targetWeightG));
+    setValue("pa_tgc", br(input.tgc));
+    if (get("pa_tgc")) get("pa_tgc").setAttribute("data-source", input.tgcSource || "Informado pelo produtor");
+    setValue("pa_temperatureC", br(input.temperatureC));
+    setValue("pa_mortalityPercent", input.mortalityPercent === undefined ? "" : br(input.mortalityPercent));
+    var prices = input.prices || {};
+    setValue("pa_price_larvas_alevinos", br(prices.larvas_alevinos));
+    setValue("pa_price_juvenil_recria", br(prices.juvenil_recria));
+    setValue("pa_price_terminacao", br(prices.terminacao));
+  }
+
+  async function fillFromLot() {
+    var cycleId = value("pa_cycleId");
+    if (!cycleId) { msg("Selecione um lote para preencher.", false); return; }
+    try {
+      var cycle = window.database ? await window.database.get("production_cycles", cycleId) : null;
+      var history = await window.BiometriaService.listBiometriesByCycle(cycleId);
+      var active = (history || []).filter(function (b) { return b.deleted !== true && String(b.status || "").toLowerCase() !== "voided"; });
+      var last = active[active.length - 1];
+      var c = cycle || {};
+      if (last) {
+        applyInput({
+          startDate: String(last.date).slice(0, 10),
+          quantity: last.currentPopulation,
+          initialWeightG: last.averageWeightG,
+          targetWeightG: c.targetWeightG || last.targetWeightG || "",
+          tgc: last.cycleTgc > 0 ? last.cycleTgc : "",
+          tgcSource: last.cycleTgc > 0 ? "TGC do lote calculado pelas biometrias até " + brDate(last.date) : "Informado pelo produtor",
+          temperatureC: last.meanTemperatureC > 0 ? last.meanTemperatureC : (last.temperatureC || ""),
+          mortalityPercent: value("pa_mortalityPercent"),
+          prices: currentInput().prices
+        });
+        msg(last.cycleTgc > 0
+          ? "Preenchido com a última biometria (" + brDate(last.date) + "). TGC e temperatura média vêm das biometrias do lote."
+          : "Preenchido com a última biometria (" + brDate(last.date) + "). O lote ainda não tem TGC: informe o TGC previsto.", true);
+      } else {
+        applyInput({
+          startDate: String(c.startDate || "").slice(0, 10),
+          quantity: c.quantityInitial || c.currentQuantity || "",
+          initialWeightG: c.initialAverageWeightG || c.currentAverageWeightG || "",
+          targetWeightG: c.targetWeightG || "",
+          tgc: "", tgcSource: "Informado pelo produtor", temperatureC: "",
+          mortalityPercent: value("pa_mortalityPercent"), prices: currentInput().prices
+        });
+        msg("Preenchido com os dados do povoamento. Informe o TGC e a temperatura média previstos.", true);
+      }
+    } catch (error) {
+      msg(error.message || "Não foi possível ler o lote.", false);
+    }
+  }
+
+  async function fillPricesFromStock() {
+    if (!window.EstoqueService || typeof window.EstoqueService.listInventoryItems !== "function") { msg("Estoque não disponível.", false); return; }
+    try {
+      var items = (await window.EstoqueService.listInventoryItems()) || [];
+      var sums = {};
+      items.forEach(function (item) {
+        var phase = window.RacaoTecnicaService ? window.RacaoTecnicaService.normalizePhase(item.feedPhase) : item.feedPhase;
+        var cost = window.AquaGestNumber.parse(item.averageCost);
+        var qty = Math.max(window.AquaGestNumber.parse(item.currentStock || item.currentQuantity), 0);
+        if (!phase || !(cost > 0)) return;
+        var s = sums[phase] || (sums[phase] = { value: 0, qty: 0, count: 0, simple: 0 });
+        s.value += cost * qty; s.qty += qty; s.count += 1; s.simple += cost;
+      });
+      var filled = 0;
+      ["larvas_alevinos", "juvenil_recria", "terminacao"].forEach(function (phase) {
+        var s = sums[phase];
+        if (!s) return;
+        var price = s.qty > 0 ? s.value / s.qty : s.simple / s.count;
+        setValue("pa_price_" + phase, br(Math.round(price * 100) / 100));
+        filled += 1;
+      });
+      msg(filled ? "Preços preenchidos com o custo médio ponderado das rações em estoque, por fase." : "Nenhuma ração com fase e custo médio no estoque.", filled > 0);
+    } catch (error) {
+      msg(error.message || "Não foi possível ler o estoque.", false);
+    }
+  }
+
+  function lotLabel() {
+    var id = value("pa_cycleId");
+    var lot = lots.find(function (l) { return l.cycleId === id; });
+    return lot ? (lot.label || lot.pondName) : "";
+  }
+
+  async function generate() {
+    if (!window.ProgramaAlimentarService) return;
+    var plan = window.ProgramaAlimentarService.buildPlan(currentInput());
+    if (!plan.ok) {
+      lastPlan = null;
+      get("pa_result").hidden = true;
+      msg(plan.errors.join(" "), false);
+      return;
+    }
+    lastPlan = plan;
+    msg("Programa gerado: " + plan.summary.weeks + " semanas.", true);
+    render(plan);
+    await renderReal(plan);
+    selectSubTab(store(SUBTAB_KEY) || "plan");
+  }
+
+  function render(plan) {
+    var s = plan.summary;
+    get("pa_result").hidden = false;
+    get("pa_summary").innerHTML = [
+      ["Duração", s.weeks + " semanas (" + s.days + " dias)" + (s.endDate ? " · até " + brDate(s.endDate) : "")],
+      ["Biomassa final", fmt(s.finalBiomassKg, 0) + " kg (" + fmt(s.finalFish) + " peixes)"],
+      ["Ração total", fmt(s.feedKg, 0) + " kg"],
+      ["CA final prevista", s.fcr === null ? "—" : fmt(s.fcr, 2)],
+      ["Custo de ração", money(s.cost)],
+      ["Custo de ração por kg produzido", s.costPerKgProduced === null ? "—" : money(s.costPerKgProduced)]
+    ].map(function (x) { return '<div class="status-card"><span>' + esc(x[0]) + "</span><strong>" + esc(x[1]) + "</strong></div>"; }).join("");
+
+    get("pa_panel_plan").innerHTML = '<div class="table-wrapper" style="overflow-x:auto"><table class="data-table pa-table"><thead><tr>' +
+      ["Semana", "Início", "Fase", "Peso (g)", "Peixes", "Biomassa (kg)", "% PV/dia", "Ração/dia (kg)", "Tratos", "Kg/trato", "Ração semana (kg)", "Acumulada (kg)", "CA semana", "CA acum.", "Proteína", "Ração", "Custo semana", "Fonte"]
+        .map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      plan.weeks.map(function (w) {
+        return "<tr><td>" + w.week + (w.days < 7 ? " (" + w.days + " d)" : "") + "</td><td>" + esc(brDate(w.startDate)) + "</td><td>" + esc(w.phaseLabel) + "</td><td>" + fmt(w.weightStartG, 1) + " → " + fmt(w.weightEndG, 1) +
+          "</td><td>" + fmt(w.fishEnd) + "</td><td>" + fmt(w.biomassEndKg, 0) + "</td><td>" + (w.feedingPercent === null ? esc(w.feedingPercentText) : fmt(w.feedingPercent, 1) + "%") +
+          "</td><td>" + fmt(w.feedDayKg, 1) + "</td><td>" + esc(String(w.meals)) + "</td><td>" + fmt(w.feedPerMealKg, 1) + "</td><td>" + fmt(w.feedWeekKg, 0) + "</td><td>" + fmt(w.feedCumKg, 0) +
+          "</td><td>" + (w.fcrWeek === null ? "—" : fmt(w.fcrWeek, 2)) + "</td><td>" + (w.fcrCum === null ? "—" : fmt(w.fcrCum, 2)) + "</td><td>" + esc(w.protein) + "</td><td>" + esc(w.pellet) +
+          "</td><td>" + money(w.costWeek) + "</td><td>" + esc(w.source) + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+
+    get("pa_panel_cost").innerHTML =
+      "<h4>Custo por fase</h4>" + table(["Fase", "Semanas", "Ração (kg)", "Custo", "% do custo"], plan.byPhase.map(function (p) {
+        return [p.label, p.weeks, fmt(p.feedKg, 0), money(p.cost), fmt(p.costPercent, 1) + "%"];
+      })) +
+      "<h4>Compra de ração por tipo</h4>" + table(["Proteína bruta", "Ração", "Semanas", "Ração (kg)", "Custo"], plan.byFeed.map(function (f) {
+        return [f.protein, f.pellet, f.weeks, fmt(f.feedKg, 0), money(f.cost)];
+      }));
+
+    get("pa_notes").innerHTML = plan.notes.length ? '<ul class="pa-notes">' + plan.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>" : "";
+  }
+
+  function table(headers, rows) {
+    return '<div class="table-wrapper" style="overflow-x:auto"><table class="data-table"><thead><tr>' + headers.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") +
+      "</tr></thead><tbody>" + rows.map(function (r) { return "<tr>" + r.map(function (c) { return "<td>" + esc(c) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
+  }
+
+  async function renderReal(plan) {
+    var panel = get("pa_panel_real");
+    var cycleId = value("pa_cycleId");
+    if (!cycleId) { panel.innerHTML = '<p class="technical-note">Selecione um lote para comparar o programa com as biometrias lançadas.</p>'; return; }
+    var history = [];
+    try { history = await window.BiometriaService.listBiometriesByCycle(cycleId); } catch (e) { history = []; }
+    var rows = window.ProgramaAlimentarService.compareWithBiometries(plan, history);
+    if (!rows.length) { panel.innerHTML = '<p class="technical-note">Nenhuma biometria do lote a partir de ' + esc(brDate(plan.input.startDate)) + ". A comparação aparece depois da próxima biometria.</p>"; return; }
+    panel.innerHTML = table(["Biometria", "Dia do programa", "Peso planejado (g)", "Peso real (g)", "Diferença", "Ração planejada acum. (kg)", "Ração real acum. (kg)", "CA real"], rows.map(function (r) {
+      return [brDate(r.date), r.day, fmt(r.plannedWeightG, 1), fmt(r.realWeightG, 1), r.weightDiffPercent === null ? "—" : (r.weightDiffPercent > 0 ? "+" : "") + fmt(r.weightDiffPercent, 1) + "%", fmt(r.plannedFeedKg, 0), fmt(r.realFeedKg, 0), r.realFcr === null ? "—" : fmt(r.realFcr, 2)];
+    })) + '<p class="technical-note">A ração real acumulada é a do lote inteiro, desde o povoamento. Se o programa começou depois do povoamento, compare a evolução entre as biometrias.</p>';
+  }
+
+  async function saveToLot() {
+    try {
+      await window.ProgramaAlimentarService.savePlan(value("pa_cycleId"), currentInput());
+      msg("Programa salvo no lote.", true);
+    } catch (error) { msg(error.message || "Não foi possível salvar.", false); }
+  }
+
+  async function loadSavedPlan() {
+    var cycleId = value("pa_cycleId");
+    if (!cycleId) return;
+    try {
+      var saved = await window.ProgramaAlimentarService.loadPlan(cycleId);
+      if (saved && saved.input) {
+        applyInput(saved.input);
+        msg("Programa salvo em " + brDate(String(saved.savedAt).slice(0, 10)) + " carregado.", true);
+        await generate();
+      } else {
+        msg("Este lote ainda não tem programa salvo. Use \"Preencher com os dados do lote\".", true);
+      }
+    } catch (e) { /* sem programa salvo */ }
+  }
+
+  function farmName() {
+    try { return (document.querySelector("[data-farm-name]") || {}).textContent || ""; } catch (e) { return ""; }
+  }
+
+  async function exportPlan(kind) {
+    if (!lastPlan) { msg("Gere o programa antes de exportar.", false); return; }
+    var X = window.RelatoriosExportService;
+    var sheets = window.ProgramaAlimentarService.exportSheets(lastPlan, lotLabel());
+    var farm = "";
+    try { var prop = window.PisciculturaService && window.PisciculturaService.getCurrentProperty ? await window.PisciculturaService.getCurrentProperty() : null; farm = prop && prop.name || farmName(); } catch (e) { farm = farmName(); }
+    if (kind === "xlsx") {
+      X.downloadWorkbook(X.fileStamp(farm, "Programa alimentar " + (lotLabel() || ""), "xlsx"), sheets, "Programa alimentar");
+      msg("Excel gerado.", true);
+    } else {
+      X.downloadMatrixCsv(X.fileStamp(farm, "Programa alimentar " + (lotLabel() || ""), "csv"), sheets[0].rows);
+      msg("CSV gerado (programa semanal).", true);
+    }
+  }
+
+  function init() {
+    if (!buildTabs()) return;
+    buildCard();
+    refreshLots();
+  }
+
+  document.addEventListener("click", function (event) {
+    if (event.target && event.target.closest && event.target.closest('[data-screen="producao"]')) setTimeout(init, 250);
+  });
+  window.addEventListener("aquagest:production-changed", function () { setTimeout(refreshLots, 300); });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(init, 0); });
+  else setTimeout(init, 0);
+
+  window.ProgramaAlimentarUI = { init: init, selectTab: selectTab, generate: generate, refreshLots: refreshLots };
+})();
+
+;
+
 /* ===== js/services/biometria-service.js ===== */
 /*
   AquaGest Lite
@@ -17810,22 +18723,15 @@
   var PRODUCTION_CHANGED_EVENT = "aquagest:production-changed";
   var PONDS_CHANGED_EVENT = "aquagest:ponds-changed";
 
-  var FEEDING_PERCENT_TABLE = [
-    { minWeightG: 0, maxWeightG: 5, percent: 8.0, label: "Alevinagem inicial" },
-    { minWeightG: 5, maxWeightG: 20, percent: 6.0, label: "Alevino" },
-    { minWeightG: 20, maxWeightG: 50, percent: 5.0, label: "Juvenil inicial" },
-    { minWeightG: 50, maxWeightG: 100, percent: 4.0, label: "Juvenil" },
-    { minWeightG: 100, maxWeightG: 300, percent: 3.0, label: "Crescimento" },
-    { minWeightG: 300, maxWeightG: 600, percent: 2.0, label: "Engorda" },
-    { minWeightG: 600, maxWeightG: 999999, percent: 1.5, label: "Terminação" }
-  ];
-
-  var PROJECTED_FCR_TABLE = [
-    { minWeightG: 0, maxWeightG: 100, fcr: 1.4, label: "Fase inicial" },
-    { minWeightG: 100, maxWeightG: 300, fcr: 1.5, label: "Crescimento inicial" },
-    { minWeightG: 300, maxWeightG: 600, fcr: 1.6, label: "Engorda" },
-    { minWeightG: 600, maxWeightG: 999999, fcr: 1.7, label: "Terminação" }
-  ];
+  /*
+    Taxas de alimentação, tratos e CA esperada: TABELA ÚNICA do motor técnico
+    (TechnicalEngine.feedingTable — SENAR 2019 e Rodrigues, Bergamin e Santos 2013).
+  */
+  function engineBand(averageWeightG) {
+    return window.TechnicalEngine && typeof window.TechnicalEngine.feedingBand === "function"
+      ? window.TechnicalEngine.feedingBand(averageWeightG)
+      : null;
+  }
 
   function ensureDependencies() {
     if (!window.database) {
@@ -18306,17 +19212,9 @@
   }
 
   function getFeedingPercentByWeight(averageWeightG) {
-    var weight = toNumber(averageWeightG);
-
-    for (var i = 0; i < FEEDING_PERCENT_TABLE.length; i += 1) {
-      var item = FEEDING_PERCENT_TABLE[i];
-
-      if (weight >= item.minWeightG && weight <= item.maxWeightG) {
-        return item;
-      }
-    }
-
-    return FEEDING_PERCENT_TABLE[FEEDING_PERCENT_TABLE.length - 1];
+    var band = engineBand(averageWeightG);
+    if (!band) return { percent: 0, label: "Aguardando peso médio", meals: 0, source: "", percentText: "" };
+    return { percent: band.percent === null ? 0 : band.percent, hasPercent: band.percent !== null, label: band.stage + " (" + band.weightLabel + ")", meals: band.meals, mealsText: band.mealsText, source: band.source, percentText: band.percentText, phase: band.phase };
   }
 
   /* Tabela única de temperatura: TechnicalEngine.feedingTemperatureInfo. */
@@ -18337,37 +19235,32 @@
     var temperature = getTemperatureFeedingFactor(temperatureC);
     var basePercent = toNumber(reference.percent);
     var suggestedPercent = basePercent * temperature.factor;
+    var message = temperature.message;
+
+    if (reference.hasPercent === false) {
+      message = "Para " + reference.label + ": " + reference.percentText + ", " + reference.mealsText + " tratos/dia (" + reference.source + "). Informe o percentual usado. " + temperature.message;
+    }
 
     return {
       basePercent: round(basePercent, 2),
+      hasReferencePercent: reference.hasPercent !== false && basePercent > 0,
       temperatureFactor: round(temperature.factor, 2),
       suggestedPercent: round(suggestedPercent, 2),
       label: reference.label,
+      mealsPerDay: reference.meals || 0,
+      source: reference.source,
       temperatureLabel: temperature.label,
-      message: temperature.message
+      message: message
     };
   }
 
+  /* CA esperada da faixa de peso atual (SENAR 2019). */
   function suggestProjectedFcr(averageWeightG) {
-    var weight = toNumber(averageWeightG);
-
-    for (var i = 0; i < PROJECTED_FCR_TABLE.length; i += 1) {
-      var item = PROJECTED_FCR_TABLE[i];
-
-      if (weight >= item.minWeightG && weight <= item.maxWeightG) {
-        return {
-          projectedFcr: round(item.fcr, 2),
-          label: item.label
-        };
-      }
+    var band = engineBand(averageWeightG);
+    if (!band || band.fcr === null) {
+      return { projectedFcr: 0, label: band ? "Sem CA de referência para " + band.weightLabel : "Aguardando peso médio" };
     }
-
-    var fallback = PROJECTED_FCR_TABLE[PROJECTED_FCR_TABLE.length - 1];
-
-    return {
-      projectedFcr: round(fallback.fcr, 2),
-      label: fallback.label
-    };
+    return { projectedFcr: round(band.fcr, 2), label: "CA esperada " + band.weightLabel + " (" + band.source + ")" };
   }
 
   function calculateFeedProjection(input, metrics, baseState) {
@@ -18402,20 +19295,37 @@
       projectedRemainingBiomassGainKg = currentPopulation * remainingWeightGainG / 1000;
     }
 
-    if (projectedRemainingBiomassGainKg > 0 && projectedFcr > 0) {
+    var manualFcr = !!(input.hasProjectedFcr && input.projectedFcr > 0);
+    var bandProjection = null;
+    if (!manualFcr && window.TechnicalEngine && typeof window.TechnicalEngine.projectedFeedByBands === "function") {
+      /* CA do SENAR aplicada ao ganho dentro de cada faixa de peso até o peso-alvo. */
+      bandProjection = window.TechnicalEngine.projectedFeedByBands(currentPopulation, averageWeightG, targetWeightG);
+    }
+
+    if (bandProjection && bandProjection.feedKg !== null && bandProjection.gainKg > 0) {
+      projectedFeedUntilEndKg = bandProjection.feedKg;
+      projectedFcr = bandProjection.fcr;
+    } else if (projectedRemainingBiomassGainKg > 0 && projectedFcr > 0 && (manualFcr || !bandProjection)) {
       projectedFeedUntilEndKg = projectedRemainingBiomassGainKg * projectedFcr;
     }
 
     projectedTotalFeedUntilEndKg = feedTotalKg + projectedFeedUntilEndKg;
 
-    if (remainingWeightGainG > 0 && gpdGDay > 0) {
+    /* Dias até o peso-alvo pelo TGC do ciclo (Jobling 2003); sem temperatura, estimativa linear pelo GPD. */
+    var daysMethod = "";
+    if (metrics.cycleTgc > 0 && metrics.meanTemperatureC > 0) {
+      projectedDaysToTarget = window.TechnicalEngine.tgcDaysToTarget(averageWeightG, targetWeightG, metrics.cycleTgc, metrics.meanTemperatureC);
+      daysMethod = "TGC";
+    } else if (remainingWeightGainG > 0 && gpdGDay > 0) {
       projectedDaysToTarget = remainingWeightGainG / gpdGDay;
+      daysMethod = "GPD linear (sem temperatura em todas as biometrias)";
     }
 
     return {
       projectedFcr: round(projectedFcr, 2),
-      projectedFcrReferenceLabel: fcrSuggestion.label,
-      projectedFcrIsManual: !!(input.hasProjectedFcr && input.projectedFcr > 0),
+      projectedFcrReferenceLabel: manualFcr ? "CA informada pelo produtor" : (bandProjection && bandProjection.feedKg !== null ? "CA esperada por faixa até o peso-alvo (SENAR 2019)" : fcrSuggestion.label),
+      projectedFcrIsManual: manualFcr,
+      projectedDaysMethod: daysMethod,
 
       remainingWeightGainG: round(remainingWeightGainG, 2),
       projectedFinalBiomassKg: round(projectedFinalBiomassKg, 2),
@@ -18463,11 +19373,12 @@
       };
     }
 
-    if (metrics.temperatureC > 0 && (metrics.temperatureC < 24 || metrics.temperatureC > 30)) {
+    var temperatureInfo = getTemperatureFeedingFactor(metrics.temperatureC);
+    if (metrics.temperatureC > 0 && temperatureInfo.factor < 1) {
       return {
-        technicalStatus: "Atenção ao manejo alimentar",
-        technicalSeverity: "warning",
-        technicalMessage: "A temperatura informada exige atenção no ajuste do arraçoamento."
+        technicalStatus: temperatureInfo.factor === 0 ? "Não fornecer ração pela temperatura" : "Atenção ao manejo alimentar",
+        technicalSeverity: temperatureInfo.factor === 0 ? "critical" : "warning",
+        technicalMessage: temperatureInfo.message
       };
     }
 
@@ -18545,34 +19456,12 @@
       );
     }
 
-    if (metrics.temperatureC > 0 && metrics.temperatureC < 18) {
-      pushRecommendation(
-        recommendations,
-        "critical",
-        "Suspender ou revisar arraçoamento por baixa temperatura",
-        "Temperatura abaixo de 18 °C reduz drasticamente o consumo. Evite sobra de ração e monitore a qualidade da água."
-      );
-    } else if (metrics.temperatureC >= 18 && metrics.temperatureC < 24) {
-      pushRecommendation(
-        recommendations,
-        "warning",
-        "Reduzir arraçoamento por temperatura baixa",
-        "A temperatura está abaixo da faixa ideal. Use o percentual ajustado pelo sistema e observe a resposta alimentar."
-      );
-    } else if (metrics.temperatureC > 30 && metrics.temperatureC <= 31) {
-      pushRecommendation(
-        recommendations,
-        "warning",
-        "Reduzir arraçoamento por temperatura elevada",
-        "Temperatura elevada aumenta o risco de estresse e queda de oxigênio. Ajuste a ração e monitore a água."
-      );
-    } else if (metrics.temperatureC > 31) {
-      pushRecommendation(
-        recommendations,
-        "critical",
-        "Suspender ou revisar arraçoamento por temperatura crítica",
-        "Temperatura acima de 31 °C exige atenção. Suspenda ou reduza fortemente a alimentação e monitore oxigênio dissolvido."
-      );
+    /* Temperatura: a mesma tabela do arraçoamento (SENAR 2019). */
+    var temperatureAdvice = getTemperatureFeedingFactor(metrics.temperatureC);
+    if (metrics.temperatureC > 0 && temperatureAdvice.factor === 0) {
+      pushRecommendation(recommendations, "critical", "Não fornecer ração pela temperatura", temperatureAdvice.message + " Acompanhe a qualidade da água.");
+    } else if (metrics.temperatureC > 0 && temperatureAdvice.factor < 1) {
+      pushRecommendation(recommendations, "warning", "Reduzir a ração pela temperatura", temperatureAdvice.message);
     }
 
     if (metrics.feedPeriodKg > 0 && metrics.biomassGainPeriodKg <= 0) {
@@ -18584,12 +19473,14 @@
       );
     }
 
-    if (metrics.fcrPeriod > 2 && metrics.fcrPeriod > 0) {
+    var expectedBand = engineBand(metrics.averageWeightG);
+    if (metrics.fcrPeriod > 0 && expectedBand && expectedBand.fcr !== null && metrics.fcrPeriod > expectedBand.fcr) {
       pushRecommendation(
         recommendations,
         "warning",
-        "Conversão alimentar elevada",
-        "A conversão alimentar do período está elevada. Revise frequência de tratos, granulometria, qualidade da ração e resposta alimentar."
+        "Conversão alimentar acima da esperada",
+        "CA do período " + String(round(metrics.fcrPeriod, 2)).replace(".", ",") + " acima da CA esperada de " + String(expectedBand.fcr).replace(".", ",") +
+          " para " + expectedBand.weightLabel + " (" + expectedBand.source + "). Revise tratos, granulometria, qualidade da ração e sobras."
       );
     }
 
@@ -18684,6 +19575,10 @@
       /* Ração acumulada começa em zero: o total do lote é resultado do recálculo, nunca entrada dele. */
       feedTotalKg: 0,
 
+      /* Graus-dia acumulados desde o povoamento (base do TGC). */
+      degreeDaysTotal: 0,
+      degreeDaysComplete: true,
+
       initialPopulation: initialQuantity,
       initialAverageWeightG: round(initialAverageWeightG, 2),
       initialBiomassKg: round(initialBiomassKg, 2),
@@ -18759,6 +19654,25 @@
     var weightGainG = averageWeightG - toNumber(previousState.averageWeightG || baseState.averageWeightG || 0);
     var gpdGDay = periodDays > 0 ? weightGainG / periodDays : 0;
 
+    /*
+      TGC do ciclo (Jobling 2003): graus-dia = soma de (temperatura da biometria × dias do período).
+      A temperatura informada na biometria representa o período desde a anterior.
+    */
+    var previousDegreeDays = toNumber(previousState.degreeDaysTotal || 0);
+    var degreeDaysComplete = previousState.degreeDaysComplete !== false;
+    var degreeDaysTotal = previousDegreeDays;
+    if (periodDays > 0) {
+      if (input.temperatureC > 0) degreeDaysTotal = previousDegreeDays + input.temperatureC * periodDays;
+      else degreeDaysComplete = false;
+    }
+    var cycleElapsedDays = diffDays(baseState.date || "", input.date);
+    var cycleTgc = 0;
+    var meanTemperatureC = 0;
+    if (degreeDaysComplete && degreeDaysTotal > 0 && cycleElapsedDays > 0 && window.TechnicalEngine && typeof window.TechnicalEngine.tgcFromDegreeDays === "function") {
+      cycleTgc = window.TechnicalEngine.tgcFromDegreeDays(baseState.initialAverageWeightG || baseState.averageWeightG, averageWeightG, degreeDaysTotal);
+      meanTemperatureC = degreeDaysTotal / cycleElapsedDays;
+    }
+
     var previousBiomassKg = toNumber(previousState.biomassKg || baseState.biomassKg || 0);
     var initialBiomassKg = toNumber(baseState.initialBiomassKg || baseState.biomassKg || 0);
 
@@ -18813,8 +19727,10 @@
       ? currentBiomassKg * feedingDosePercent / 100
       : 0;
 
-    var recommendedFeedMealKg = input.mealsPerDay > 0 && recommendedFeedDayKg > 0
-      ? recommendedFeedDayKg / input.mealsPerDay
+    /* Tratos por dia: o informado pelo produtor; se vazio, o da faixa de peso (SENAR 2019 / Rodrigues 2013). */
+    var mealsPerDay = input.mealsPerDay > 0 ? input.mealsPerDay : toInteger(feedingSuggestion.mealsPerDay);
+    var recommendedFeedMealKg = mealsPerDay > 0 && recommendedFeedDayKg > 0
+      ? recommendedFeedDayKg / mealsPerDay
       : 0;
 
     var targetWeightG = toNumber(baseState.targetWeightG || 0);
@@ -18874,12 +19790,25 @@
       feedingDosePercent: round(feedingDosePercent, 2),
       recommendedFeedDayBaseKg: round(recommendedFeedDayBaseKg, 3),
       recommendedFeedDayKg: round(recommendedFeedDayKg, 3),
-      mealsPerDay: input.mealsPerDay,
+      mealsPerDay: mealsPerDay,
+      mealsPerDaySource: input.mealsPerDay > 0 ? "Informado pelo produtor" : (feedingSuggestion.source || ""),
+      feedingReferenceSource: feedingSuggestion.source || "",
       recommendedFeedMealKg: round(recommendedFeedMealKg, 3),
 
       targetWeightG: round(targetWeightG, 2),
-      targetProgressPercent: round(targetProgressPercent, 2)
+      targetProgressPercent: round(targetProgressPercent, 2),
+
+      degreeDaysTotal: round(degreeDaysTotal, 1),
+      degreeDaysComplete: degreeDaysComplete,
+      cycleTgc: round(cycleTgc, 4),
+      meanTemperatureC: round(meanTemperatureC, 1)
     };
+
+    var feedProjection = calculateFeedProjection(input, metrics, baseState);
+
+    Object.keys(feedProjection).forEach(function (key) {
+      metrics[key] = feedProjection[key];
+    });
 
     if (window.TechnicalEngine && typeof window.TechnicalEngine.harvestProjection === "function") {
       var harvest = window.TechnicalEngine.harvestProjection(
@@ -18888,19 +19817,24 @@
         averageWeightG,
         targetWeightG,
         gpdGDay,
-        ctx.cycle && ctx.cycle.plannedCycleDays
+        ctx.cycle && ctx.cycle.plannedCycleDays,
+        metrics.projectedDaysMethod === "TGC" ? metrics.projectedDaysToTarget : 0
       );
       Object.keys(harvest).forEach(function (key) { metrics[key] = harvest[key]; });
     }
 
-    var feedProjection = calculateFeedProjection(input, metrics, baseState);
-
-    Object.keys(feedProjection).forEach(function (key) {
-      metrics[key] = feedProjection[key];
-    });
-
     var classification = classifyTechnicalStatus(metrics, pond);
     var recommendations = buildTechnicalRecommendations(metrics, pond);
+
+    /* Ciclo planejado do lote (não mais fixo em 180 dias). */
+    if (metrics.plannedHarvestDate && metrics.currentPopulation > 0 && metrics.averageWeightG > 0) {
+      var brDate = function (iso) { var p = String(iso || "").split("-"); return p.length === 3 ? p[2] + "/" + p[1] + "/" + p[0] : iso; };
+      if (metrics.harvestProjectionCompatible === false) {
+        pushRecommendation(recommendations, "warning", "Ciclo planejado de " + metrics.plannedCycleDays + " dias", metrics.harvestProjectionWarning + " Despesca planejada: " + brDate(metrics.plannedHarvestDate) + "; pelo desempenho atual: " + brDate(metrics.performanceProjectedHarvestDate) + ".");
+      } else if (metrics.performanceProjectedHarvestDate) {
+        pushRecommendation(recommendations, "normal", "Ciclo planejado de " + metrics.plannedCycleDays + " dias", "Desempenho compatível com o planejamento. Despesca planejada: " + brDate(metrics.plannedHarvestDate) + "; pelo desempenho atual: " + brDate(metrics.performanceProjectedHarvestDate) + ".");
+      }
+    }
 
     metrics.technicalStatus = classification.technicalStatus;
     metrics.technicalSeverity = classification.technicalSeverity;
@@ -18922,6 +19856,8 @@
       densityFishM3: metrics.currentDensityFishM3,
       capacityUsePercent: metrics.capacityUsePercent,
       feedTotalKg: metrics.feedTotalKg,
+      degreeDaysTotal: metrics.degreeDaysTotal,
+      degreeDaysComplete: metrics.degreeDaysComplete,
 
       latestBiometryId: input.id || "",
       latestBiometryDate: input.date,
@@ -19317,6 +20253,8 @@
       densityFishM3: toNumber(record.currentDensityFishM3),
       capacityUsePercent: toNumber(record.capacityUsePercent),
       feedTotalKg: toNumber(record.feedTotalKg),
+      degreeDaysTotal: toNumber(record.degreeDaysTotal),
+      degreeDaysComplete: record.degreeDaysComplete !== false && record.degreeDaysTotal !== undefined,
 
       latestBiometryId: record.id || "",
       latestBiometryDate: record.date || "",
@@ -19622,6 +20560,16 @@
       projectedFeedUntilEndKg: metrics.projectedFeedUntilEndKg,
       projectedTotalFeedUntilEndKg: metrics.projectedTotalFeedUntilEndKg,
       projectedDaysToTarget: metrics.projectedDaysToTarget,
+      projectedDaysMethod: metrics.projectedDaysMethod || "",
+      degreeDaysTotal: metrics.degreeDaysTotal,
+      degreeDaysComplete: metrics.degreeDaysComplete,
+      cycleTgc: metrics.cycleTgc,
+      meanTemperatureC: metrics.meanTemperatureC,
+      plannedCycleDays: metrics.plannedCycleDays,
+      plannedHarvestDate: metrics.plannedHarvestDate || "",
+      performanceProjectedHarvestDate: metrics.performanceProjectedHarvestDate || "",
+      harvestProjectionCompatible: metrics.harvestProjectionCompatible !== false,
+      harvestProjectionWarning: metrics.harvestProjectionWarning || "",
 
       technicalStatus: metrics.technicalStatus,
       technicalSeverity: metrics.technicalSeverity,
@@ -26941,14 +27889,35 @@
 ;
 
 /* ===== js/services/dimensionamento-service.js ===== */
-/* AquaGest Lite — dimensionamento básico da aeração em viveiros. */
+/*
+  AquaGest Pro — dimensionamento básico da aeração em viveiros.
+
+  - Parâmetros editáveis (capacidade natural em kg/m² e kg adicionais por CV), com a fonte exibida.
+  - Uma só unidade de potência: CV. Valores em HP são convertidos (1 HP = 1,014 CV).
+  - Decisão de manejo baseada no oxigênio dissolvido (OD) medido; o horário é só lembrete de monitoramento.
+*/
 (function () {
   "use strict";
 
-  var VERSION = "dimensionamento-basico-v1";
-  var NATURAL_PRODUCTION_KG_PER_M2 = 0.6;
-  var EXTRA_PRODUCTION_KG_PER_CV_LOW = 1000;
-  var EXTRA_PRODUCTION_KG_PER_CV_HIGH = 1500;
+  var VERSION = "dimensionamento-v2-od-parametros";
+  var HP_TO_CV = 1.014;
+  /*
+    Valores padrão com fonte:
+    - Sem aeração: 1.500 a 2.000 kg/ha em viveiro semi-intensivo com ração e troca de água
+      (Boyd, 2022, Global Seafood Alliance). Padrão = 1.500 kg/ha (0,15 kg/m²), o limite conservador.
+    - Com aeração: cada hp permite cerca de 500 kg/ha a mais (Boyd, 1997, citado pela Embrapa,
+      Comunicado Técnico 54, Queiroz e Boeira, 2016). 500 kg por hp = 493 kg por CV (1 hp = 1,014 CV).
+  */
+  var DEFAULTS = {
+    naturalKgPerM2: 0.15,
+    kgPerCvLow: 493,
+    kgPerCvHigh: 493,
+    source: "Sem aeração: 1.500–2.000 kg/ha (Boyd, 2022); padrão 1.500 kg/ha. Com aeração: cerca de 500 kg/ha a mais por hp, igual a 493 kg por CV (Boyd, 1997, citado pela Embrapa, Comunicado Técnico 54, 2016)."
+  };
+  /* Limiares de OD para tilápia (mg/L). */
+  var DO_CRITICAL = 2;
+  var DO_TURN_ON = 4;
+  var DO_COMFORT = 5;
 
   function number(value, fallback) {
     /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
@@ -26957,7 +27926,7 @@
     var fb = fallback === undefined ? 0 : fallback;
     if (value === null || value === undefined || value === "") return fb;
     if (typeof value === "number") return Number.isFinite(value) ? value : fb;
-    var text = String(value).trim().replace(/[\s\u00a0]/g, "");
+    var text = String(value).trim().replace(/[\s ]/g, "");
     if (!text) return fb;
     if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
     var parsed = Number(text);
@@ -26970,9 +27939,18 @@
     return parsed;
   }
 
+  function optionalPositive(value, fallback, label) {
+    if (value === null || value === undefined || String(value).trim() === "") return fallback;
+    return positive(value, label);
+  }
+
   function round(value, decimals) {
     var factor = Math.pow(10, decimals || 2);
     return Math.round((Number(value) || 0) * factor) / factor;
+  }
+
+  function toCv(value, unit) {
+    return String(unit || "cv").toLowerCase() === "hp" ? value * HP_TO_CV : value;
   }
 
   function calculate(input) {
@@ -26980,16 +27958,25 @@
     var pondAreaM2 = positive(data.pondAreaM2, "A área total do viveiro");
     var targetProductionKg = positive(data.targetProductionKg, "A produção desejada");
     /* Potência 0 ou vazia é erro: não assume 1,5 CV sem avisar. */
-    var equipmentPowerCv = positive(data.equipmentPowerCv, "A potência unitária do aerador");
+    var powerUnit = String(data.powerUnit || "cv").toLowerCase() === "hp" ? "hp" : "cv";
+    var informedPower = positive(data.equipmentPowerCv !== undefined ? data.equipmentPowerCv : data.equipmentPower, "A potência unitária do aerador");
+    var equipmentPowerCv = toCv(informedPower, powerUnit);
     var species = String(data.species || "Não informada").trim() || "Não informada";
 
-    var naturalCapacityKg = pondAreaM2 * NATURAL_PRODUCTION_KG_PER_M2;
+    var naturalKgPerM2 = optionalPositive(data.naturalKgPerM2, DEFAULTS.naturalKgPerM2, "A capacidade natural (kg/m²)");
+    var kgPerCvLow = optionalPositive(data.kgPerCvLow, DEFAULTS.kgPerCvLow, "O mínimo de kg por CV");
+    var kgPerCvHigh = optionalPositive(data.kgPerCvHigh, DEFAULTS.kgPerCvHigh, "O máximo de kg por CV");
+    if (kgPerCvHigh < kgPerCvLow) { var swap = kgPerCvLow; kgPerCvLow = kgPerCvHigh; kgPerCvHigh = swap; }
+    var source = String(data.source || "").trim() || DEFAULTS.source;
+    var customParameters = naturalKgPerM2 !== DEFAULTS.naturalKgPerM2 || kgPerCvLow !== DEFAULTS.kgPerCvLow || kgPerCvHigh !== DEFAULTS.kgPerCvHigh;
+
+    var naturalCapacityKg = pondAreaM2 * naturalKgPerM2;
     var additionalBiomassKg = Math.max(0, targetProductionKg - naturalCapacityKg);
     var biomassDensityKgM2 = targetProductionKg / pondAreaM2;
-    var powerRangeMinCv = additionalBiomassKg > 0 ? additionalBiomassKg / EXTRA_PRODUCTION_KG_PER_CV_HIGH : 0;
-    var powerRangeMaxCv = additionalBiomassKg > 0 ? additionalBiomassKg / EXTRA_PRODUCTION_KG_PER_CV_LOW : 0;
-    var aeratorsMinimum = additionalBiomassKg > 0 ? Math.ceil(powerRangeMinCv / equipmentPowerCv) : 0;
-    var aeratorsRecommended = additionalBiomassKg > 0 ? Math.ceil(powerRangeMaxCv / equipmentPowerCv) : 0;
+    var powerRangeMinCv = additionalBiomassKg > 0 ? additionalBiomassKg / kgPerCvHigh : 0;
+    var powerRangeMaxCv = additionalBiomassKg > 0 ? additionalBiomassKg / kgPerCvLow : 0;
+    var aeratorsMinimum = additionalBiomassKg > 0 ? Math.ceil(round(powerRangeMinCv / equipmentPowerCv, 6)) : 0;
+    var aeratorsRecommended = additionalBiomassKg > 0 ? Math.ceil(round(powerRangeMaxCv / equipmentPowerCv, 6)) : 0;
     var installedPowerCv = aeratorsRecommended * equipmentPowerCv;
     var naturalMarginKg = Math.max(0, naturalCapacityKg - targetProductionKg);
 
@@ -26998,8 +27985,11 @@
       species: species,
       pondAreaM2: round(pondAreaM2, 2),
       targetProductionKg: round(targetProductionKg, 2),
-      equipmentPowerCv: round(equipmentPowerCv, 2),
+      powerUnit: powerUnit,
+      informedPower: round(informedPower, 3),
+      equipmentPowerCv: round(equipmentPowerCv, 3),
       naturalCapacityKg: round(naturalCapacityKg, 2),
+      naturalCapacityKgM2: round(naturalKgPerM2, 3),
       additionalBiomassKg: round(additionalBiomassKg, 2),
       biomassDensityKgM2: round(biomassDensityKgM2, 3),
       naturalMarginKg: round(naturalMarginKg, 2),
@@ -27009,69 +27999,76 @@
       aeratorsMinimum: aeratorsMinimum,
       aeratorsRecommended: aeratorsRecommended,
       installedPowerCv: round(installedPowerCv, 2),
+      parameters: { naturalKgPerM2: naturalKgPerM2, kgPerCvLow: kgPerCvLow, kgPerCvHigh: kgPerCvHigh, source: source, custom: customParameters },
       assumptions: {
-        naturalProductionKgPer1000M2: 600,
-        additionalProductionKgPerCv: { min: 1000, max: 1500 },
-        referenceEquipmentPowerCv: 1.5
+        naturalProductionKgPer1000M2: round(naturalKgPerM2 * 1000, 1),
+        additionalProductionKgPerCv: { min: kgPerCvLow, max: kgPerCvHigh },
+        hpToCv: HP_TO_CV,
+        source: source
       }
     };
   }
 
   function timeLabel(date) {
-    var hours = String(date.getHours()).padStart(2, "0");
-    var minutes = String(date.getMinutes()).padStart(2, "0");
-    return hours + ":" + minutes;
+    return String(date.getHours()).padStart(2, "0") + ":" + String(date.getMinutes()).padStart(2, "0");
   }
 
-  function getAutomaticDecision(result, now) {
+  function isNight(minutes) {
+    return minutes >= 1080 || minutes < 360; /* 18:00 às 06:00, sem fotossíntese */
+  }
+
+  function decisionFromOxygen(od, minutes, data) {
+    var night = isNight(minutes);
+    if (od < DO_CRITICAL) {
+      return { code: "do-critical", tone: "critical", label: "OD crítico (" + round(od, 2) + " mg/L): ligar toda a aeração agora", action: "Ligar todos os aeradores imediatamente, suspender o arraçoamento e medir o OD novamente em 30 minutos." };
+    }
+    if (od < DO_TURN_ON) {
+      return { code: "do-turn-on", tone: night ? "critical" : "attention", label: "OD abaixo de " + DO_TURN_ON + " mg/L: ligar a aeração", action: "Ligar a aeração agora" + (data && data.aeratorsRecommended ? " (" + data.aeratorsRecommended + " aerador(es) de referência)" : "") + ", independentemente do horário, e medir o OD novamente em 1 hora." };
+    }
+    if (od < DO_COMFORT && night) {
+      return { code: "do-watch-night", tone: "attention", label: "OD em queda no período noturno", action: "OD entre " + DO_TURN_ON + " e " + DO_COMFORT + " mg/L à noite tende a cair até o amanhecer. Medir de novo em 1 a 2 horas; ligar se ficar abaixo de " + DO_TURN_ON + " mg/L." };
+    }
+    return { code: "do-ok", tone: "safe", label: "OD adequado (" + round(od, 2) + " mg/L)", action: "Aeração não é necessária agora pelo OD medido. " + (night ? "Repetir a medição antes da madrugada (23:00–06:00)." : "Repetir a medição no fim da tarde e à noite.") };
+  }
+
+  function decisionByHourReminder(data, minutes) {
+    if (!data.requiresAeration) {
+      return { code: "natural-monitoring", tone: "safe", label: "Monitoramento sem acionamento pela regra de biomassa", action: "Meça o oxigênio dissolvido; ligue a aeração em qualquer horário se o OD ficar abaixo de " + DO_TURN_ON + " mg/L." };
+    }
+    if (minutes >= 1380 || minutes < 360) {
+      return { code: "critical-aeration", tone: "critical", label: "Período crítico: medir o OD", action: "Madrugada é o período de menor oxigênio. Sem medição de OD, manter a aeração ligada até o amanhecer; com medição, ligar se estiver abaixo de " + DO_TURN_ON + " mg/L." };
+    }
+    if (minutes >= 900 && minutes < 1020) {
+      return { code: "preventive-mixing", tone: "attention", label: "Mistura preventiva da coluna d’água", action: "Lembrete: entre 15:00 e 17:00 a mistura reduz a estratificação. Informe o OD medido para uma decisão baseada na água." };
+    }
+    if (minutes >= 1080 && minutes < 1380) {
+      return { code: "scheduled-pause", tone: "neutral", label: "Início da noite: medir o OD", action: "Lembrete de monitoramento: meça o OD. Abaixo de " + DO_TURN_ON + " mg/L, ligar a aeração mesmo antes das 23:00." };
+    }
+    return { code: "day-monitoring", tone: "neutral", label: "Monitoramento diurno", action: "Informe o OD medido para decidir pela água; a próxima janela crítica começa à noite." };
+  }
+
+  /*
+    getAutomaticDecision(resultado, agora, odMedido)
+    Com OD medido, a decisão é pelo OD (vale para qualquer horário).
+    Sem OD, o horário serve só como lembrete de monitoramento.
+  */
+  function getAutomaticDecision(result, now, measuredDoMgL) {
     var data = result && result.naturalCapacityKg !== undefined ? result : calculate(result || {});
     var date = now ? new Date(now) : new Date();
     if (Number.isNaN(date.getTime())) date = new Date();
     var minutes = date.getHours() * 60 + date.getMinutes();
-    var decision;
-
-    if (!data.requiresAeration) {
-      decision = {
-        code: "natural-monitoring",
-        tone: "safe",
-        label: "Monitoramento sem acionamento pela regra de biomassa",
-        action: "Não acionar automaticamente pela capacidade calculada. Monitore o oxigênio dissolvido e as condições do viveiro."
-      };
-    } else if (minutes >= 1380 || minutes < 360) {
-      decision = {
-        code: "critical-aeration",
-        tone: "critical",
-        label: "Aeração no período crítico",
-        action: "Manter a aeração na potência recomendada até o amanhecer, com conferência do oxigênio dissolvido."
-      };
-    } else if (minutes >= 900 && minutes < 1020) {
-      decision = {
-        code: "preventive-mixing",
-        tone: "attention",
-        label: "Mistura preventiva da coluna d’água",
-        action: "Programar mistura entre 15:00 e 17:00 para reduzir a estratificação, conforme a condição do viveiro."
-      };
-    } else if (minutes >= 1080 && minutes < 1380) {
-      decision = {
-        code: "scheduled-pause",
-        tone: "neutral",
-        label: "Pausa programada com monitoramento",
-        action: "Manter desligado pela regra geral entre 18:00 e 23:00 e monitorar o oxigênio dissolvido."
-      };
-    } else {
-      decision = {
-        code: "day-monitoring",
-        tone: "neutral",
-        label: "Monitoramento diurno",
-        action: "Manter o plano de monitoramento; a próxima janela crítica começa às 23:00."
-      };
-    }
+    var odRaw = measuredDoMgL !== undefined ? measuredDoMgL : (result && result.measuredDoMgL);
+    var hasOd = odRaw !== undefined && odRaw !== null && String(odRaw).trim() !== "" && number(odRaw, -1) >= 0;
+    var od = hasOd ? number(odRaw) : null;
+    var decision = hasOd ? decisionFromOxygen(od, minutes, data) : decisionByHourReminder(data, minutes);
 
     return {
       code: decision.code,
       tone: decision.tone,
       label: decision.label,
       action: decision.action,
+      basedOn: hasOd ? "oxigenio" : "horario",
+      measuredDoMgL: od,
       time: timeLabel(date),
       recommendedAerators: data.aeratorsRecommended,
       installedPowerCv: data.installedPowerCv,
@@ -27083,10 +28080,15 @@
     VERSION: VERSION,
     calculate: calculate,
     getAutomaticDecision: getAutomaticDecision,
+    toCv: toCv,
+    defaults: DEFAULTS,
     constants: {
-      NATURAL_PRODUCTION_KG_PER_M2: NATURAL_PRODUCTION_KG_PER_M2,
-      EXTRA_PRODUCTION_KG_PER_CV_LOW: EXTRA_PRODUCTION_KG_PER_CV_LOW,
-      EXTRA_PRODUCTION_KG_PER_CV_HIGH: EXTRA_PRODUCTION_KG_PER_CV_HIGH
+      NATURAL_PRODUCTION_KG_PER_M2: DEFAULTS.naturalKgPerM2,
+      EXTRA_PRODUCTION_KG_PER_CV_LOW: DEFAULTS.kgPerCvLow,
+      EXTRA_PRODUCTION_KG_PER_CV_HIGH: DEFAULTS.kgPerCvHigh,
+      HP_TO_CV: HP_TO_CV,
+      DO_TURN_ON_MG_L: DO_TURN_ON,
+      DO_CRITICAL_MG_L: DO_CRITICAL
     }
   };
 })();
@@ -27094,20 +28096,101 @@
 ;
 
 /* ===== js/ui/dimensionamento-ui.js ===== */
-/* AquaGest Lite — interface do dimensionamento básico. */
+/* AquaGest Pro — interface do dimensionamento da aeração (parâmetros editáveis, CV/HP, decisão pelo OD). */
 (function () {
   "use strict";
 
   var initialized = false;
   var lastResult = null;
+  var pondsCache = [];
+  var PARAMS_KEY = "aq_dimensionamento_params_v2";
+  var PARAM_FIELDS = ["dimension_naturalKgPerM2", "dimension_kgPerCvLow", "dimension_kgPerCvHigh", "dimension_source"];
 
   function get(id) { return document.getElementById(id); }
   function value(id) { return get(id) ? get(id).value : ""; }
   function set(id, content) { if (get(id)) get(id).textContent = content; }
-  function format(value, decimals) { return Number(value || 0).toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }); }
+  function format(v, decimals) { return Number(v || 0).toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }); }
   function message(text, kind) {
     if (window.AquaGestApp && typeof window.AquaGestApp.showMessage === "function") window.AquaGestApp.showMessage(text, kind || "info");
     else if (window.alert) window.alert(text);
+  }
+
+  function defaults() { return (window.DimensionamentoService && window.DimensionamentoService.defaults) || { naturalKgPerM2: 0.6, kgPerCvLow: 1000, kgPerCvHigh: 1500, source: "" }; }
+
+  function loadParams() {
+    var saved = null;
+    try { saved = JSON.parse(window.localStorage.getItem(PARAMS_KEY) || "null"); } catch (e) { saved = null; }
+    var d = defaults();
+    var p = saved || {};
+    if (get("dimension_naturalKgPerM2")) get("dimension_naturalKgPerM2").value = p.naturalKgPerM2 || d.naturalKgPerM2;
+    if (get("dimension_kgPerCvLow")) get("dimension_kgPerCvLow").value = p.kgPerCvLow || d.kgPerCvLow;
+    if (get("dimension_kgPerCvHigh")) get("dimension_kgPerCvHigh").value = p.kgPerCvHigh || d.kgPerCvHigh;
+    if (get("dimension_source")) get("dimension_source").value = p.source || "";
+  }
+
+  function saveParams() {
+    try {
+      window.localStorage.setItem(PARAMS_KEY, JSON.stringify({
+        naturalKgPerM2: value("dimension_naturalKgPerM2"), kgPerCvLow: value("dimension_kgPerCvLow"),
+        kgPerCvHigh: value("dimension_kgPerCvHigh"), source: value("dimension_source")
+      }));
+    } catch (e) { /* armazenamento indisponível: segue só com os valores da tela */ }
+  }
+
+  function resetParams() {
+    try { window.localStorage.removeItem(PARAMS_KEY); } catch (e) { /* ignora */ }
+    loadParams();
+    calculateFromFields();
+  }
+
+  function renderAssumption(result) {
+    var d = defaults();
+    var natural = result ? result.parameters.naturalKgPerM2 : AquaNumber(value("dimension_naturalKgPerM2"), d.naturalKgPerM2);
+    var low = result ? result.parameters.kgPerCvLow : AquaNumber(value("dimension_kgPerCvLow"), d.kgPerCvLow);
+    var high = result ? result.parameters.kgPerCvHigh : AquaNumber(value("dimension_kgPerCvHigh"), d.kgPerCvHigh);
+    set("dimension_assumptionText", format(natural * 1000, 0) + " kg de peixe por 1.000 m² (" + format(natural, 2) + " kg/m²) sem aeração adicional e " + format(low, 0) + " a " + format(high, 0) + " kg adicionais por CV de aeração.");
+    var source = String(value("dimension_source") || "").trim();
+    set("dimension_sourceText", "Fonte: " + (source || d.source));
+  }
+
+  function AquaNumber(v, fallback) {
+    var n = window.AquaGestNumber ? window.AquaGestNumber.parse(v, fallback) : Number(v);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  }
+
+  function selectedPond() {
+    var id = value("dimension_pondId");
+    return id ? pondsCache.find(function (p) { return p.id === id; }) : null;
+  }
+
+  function renderPondCapacity() {
+    var pond = selectedPond();
+    if (!pond) { set("dimension_pondCapacity", "Selecione um viveiro"); return; }
+    var area = Number(pond.areaM2) || 0;
+    var maxBiomass = Number(pond.maxBiomassKg) || 0;
+    var kgM2 = area > 0 ? maxBiomass / area : 0;
+    set("dimension_pondCapacity", maxBiomass > 0
+      ? format(maxBiomass, 0) + " kg (" + format(kgM2, 2) + " kg/m²)"
+      : "Capacidade não informada no viveiro");
+  }
+
+  async function loadPonds() {
+    var select = get("dimension_pondId");
+    if (!select || !window.ViveirosService || typeof window.ViveirosService.listActivePonds !== "function") return;
+    try { pondsCache = await window.ViveirosService.listActivePonds() || []; } catch (e) { pondsCache = []; }
+    var current = select.value;
+    select.innerHTML = '<option value="">Digitar a área manualmente</option>' + pondsCache.map(function (p) {
+      return '<option value="' + String(p.id).replace(/"/g, "&quot;") + '">' + String(p.name || "Viveiro").replace(/</g, "&lt;") + " — " + format(p.areaM2, 0) + " m²</option>";
+    }).join("");
+    if (current) select.value = current;
+    renderPondCapacity();
+  }
+
+  function onPondChange() {
+    var pond = selectedPond();
+    if (pond && Number(pond.areaM2) > 0 && get("dimension_pondAreaM2")) get("dimension_pondAreaM2").value = pond.areaM2;
+    renderPondCapacity();
+    calculateFromFields();
   }
 
   function renderAutomaticDecision() {
@@ -27119,55 +28202,67 @@
     if (!lastResult) {
       card.className = "dimensionamento-auto-card is-idle";
       title.textContent = "Aguardando dados do dimensionamento";
-      action.textContent = "Preencha espécie, produção, área e potência do aerador para ativar a decisão automática.";
+      action.textContent = "Preencha espécie, produção, área e potência do aerador. Informe o OD medido para a decisão pela água.";
       time.textContent = "Atualização automática a cada minuto";
       return;
     }
-    var decision = window.DimensionamentoService.getAutomaticDecision(lastResult, new Date());
+    var decision = window.DimensionamentoService.getAutomaticDecision(lastResult, new Date(), value("dimension_measuredDo"));
     card.className = "dimensionamento-auto-card is-" + decision.tone;
     title.textContent = decision.label;
     action.textContent = decision.action;
-    time.textContent = "Decisão atualizada às " + decision.time + ". Referência: " + decision.recommendedAerators + " aerador(es), " + format(decision.installedPowerCv, 1) + " CV instalados.";
+    time.textContent = (decision.basedOn === "oxigenio" ? "Decisão pelo OD medido" : "Sem OD informado: lembrete pelo horário") +
+      ", às " + decision.time + ". Referência: " + decision.recommendedAerators + " aerador(es), " + format(decision.installedPowerCv, 1) + " CV instalados.";
   }
 
   function calculate(event, notifyOnError) {
     if (event) event.preventDefault();
+    saveParams();
     try {
       lastResult = window.DimensionamentoService.calculate({
         species: value("dimension_species"),
         targetProductionKg: value("dimension_targetProductionKg"),
         pondAreaM2: value("dimension_pondAreaM2"),
-        equipmentPowerCv: value("dimension_equipmentPowerCv")
+        equipmentPowerCv: value("dimension_equipmentPowerCv"),
+        powerUnit: value("dimension_powerUnit"),
+        naturalKgPerM2: value("dimension_naturalKgPerM2"),
+        kgPerCvLow: value("dimension_kgPerCvLow"),
+        kgPerCvHigh: value("dimension_kgPerCvHigh"),
+        source: value("dimension_source")
       });
+      var r = lastResult;
+      var powerText = format(r.equipmentPowerCv, 2) + " CV" + (r.powerUnit === "hp" ? " (" + format(r.informedPower, 2) + " HP)" : "");
 
-      set("dimension_naturalCapacity", format(lastResult.naturalCapacityKg, 1) + " kg");
-      set("dimension_density", format(lastResult.biomassDensityKgM2, 3) + " kg/m²");
-      set("dimension_additionalBiomass", format(lastResult.additionalBiomassKg, 1) + " kg");
-      set("dimension_powerRange", format(lastResult.powerRangeMinCv, 1) + "–" + format(lastResult.powerRangeMaxCv, 1) + " CV");
-      set("dimension_aeratorCount", lastResult.aeratorsRecommended + " × " + format(lastResult.equipmentPowerCv, 1) + " CV");
-      set("dimension_installedPower", format(lastResult.installedPowerCv, 1) + " CV");
+      set("dimension_naturalCapacity", format(r.naturalCapacityKg, 1) + " kg (" + format(r.naturalCapacityKgM2, 2) + " kg/m²)");
+      set("dimension_density", format(r.biomassDensityKgM2, 3) + " kg/m²");
+      set("dimension_additionalBiomass", format(r.additionalBiomassKg, 1) + " kg");
+      set("dimension_powerRange", format(r.powerRangeMinCv, 1) + "–" + format(r.powerRangeMaxCv, 1) + " CV");
+      set("dimension_aeratorCount", r.aeratorsRecommended + " × " + powerText);
+      set("dimension_installedPower", format(r.installedPowerCv, 1) + " CV");
 
       var status = get("dimension_status");
       if (status) {
-        status.className = "dimensionamento-alert " + (lastResult.requiresAeration ? "is-warning" : "is-safe");
-        status.textContent = lastResult.requiresAeration
+        status.className = "dimensionamento-alert " + (r.requiresAeration ? "is-warning" : "is-safe");
+        status.textContent = r.requiresAeration
           ? "A produção desejada ultrapassa a capacidade natural estimada. A aeração artificial deve ser prevista e monitorada."
           : "A produção desejada está dentro da capacidade natural estimada pela regra informada. Mantenha o monitoramento do oxigênio dissolvido.";
       }
 
-      set("dimension_recommendation", lastResult.requiresAeration
-        ? "Faixa teórica: " + format(lastResult.powerRangeMinCv, 1) + " a " + format(lastResult.powerRangeMaxCv, 1) + " CV. Para uma margem conservadora, considere " + lastResult.aeratorsRecommended + " aerador(es) de " + format(lastResult.equipmentPowerCv, 1) + " CV, totalizando " + format(lastResult.installedPowerCv, 1) + " CV instalados."
+      set("dimension_recommendation", r.requiresAeration
+        ? "Faixa teórica: " + format(r.powerRangeMinCv, 1) + " a " + format(r.powerRangeMaxCv, 1) + " CV. Para uma margem conservadora, considere " + r.aeratorsRecommended + " aerador(es) de " + powerText + ", totalizando " + format(r.installedPowerCv, 1) + " CV instalados."
         : "Não há potência adicional calculada pela regra natural. A decisão final deve considerar oxigênio dissolvido, profundidade, renovação de água, alimentação e condições climáticas.");
-      set("dimension_context", "Espécie informada: " + lastResult.species + ". Área: " + format(lastResult.pondAreaM2, 1) + " m². Produção desejada: " + format(lastResult.targetProductionKg, 1) + " kg.");
+      set("dimension_context", "Espécie informada: " + r.species + ". Área: " + format(r.pondAreaM2, 1) + " m². Produção desejada: " + format(r.targetProductionKg, 1) + " kg." + (r.parameters.custom ? " Parâmetros personalizados em uso." : ""));
+      renderAssumption(r);
       renderAutomaticDecision();
     } catch (error) {
       lastResult = null;
+      renderAssumption(null);
       renderAutomaticDecision();
       if (notifyOnError) message(error.message || "Não foi possível calcular o dimensionamento.", "warning");
     }
   }
 
   function calculateFromFields() {
+    renderAssumption(null);
     if (!value("dimension_species").trim() || !value("dimension_targetProductionKg").trim() || !value("dimension_pondAreaM2").trim() || !value("dimension_equipmentPowerCv").trim()) {
       lastResult = null;
       renderAutomaticDecision();
@@ -27179,17 +28274,29 @@
   function init() {
     if (initialized) return;
     initialized = true;
+    loadParams();
+    renderAssumption(null);
     var form = get("dimensionamentoForm");
     if (form) form.addEventListener("submit", function (event) { calculate(event, true); });
-    ["dimension_species", "dimension_targetProductionKg", "dimension_pondAreaM2", "dimension_equipmentPowerCv"].forEach(function (id) {
+    ["dimension_species", "dimension_targetProductionKg", "dimension_pondAreaM2", "dimension_equipmentPowerCv", "dimension_powerUnit"].concat(PARAM_FIELDS).forEach(function (id) {
       var field = get(id);
-      if (field) field.addEventListener("input", calculateFromFields);
+      if (field) { field.addEventListener("input", calculateFromFields); field.addEventListener("change", calculateFromFields); }
     });
+    var od = get("dimension_measuredDo");
+    if (od) od.addEventListener("input", renderAutomaticDecision);
+    var pond = get("dimension_pondId");
+    if (pond) pond.addEventListener("change", onPondChange);
+    var reset = get("dimension_resetParams");
+    if (reset) reset.addEventListener("click", resetParams);
+    document.addEventListener("click", function (event) {
+      if (event.target && event.target.closest && event.target.closest('[data-screen="dimensionamento"]')) setTimeout(loadPonds, 200);
+    });
+    loadPonds();
     renderAutomaticDecision();
     window.setInterval(renderAutomaticDecision, 60000);
   }
 
-  window.DimensionamentoUI = { init: init, calculate: calculate };
+  window.DimensionamentoUI = { init: init, calculate: calculate, loadPonds: loadPonds };
 })();
 
 ;
@@ -27646,7 +28753,19 @@
     );
   }
 
+  /*
+    Idempotente: uma leitura já normalizada não é normalizada de novo.
+    (Na segunda passada, um campo vazio que virou 0 passava a contar como "informado"
+    e a alcalinidade vazia aparecia como crítica ao salvar.)
+  */
   function normalizeWaterInput(data) {
+    if (data && data.__waterNormalized === true) return data;
+    var normalized = normalizeWaterInputOnce(data);
+    Object.defineProperty(normalized, "__waterNormalized", { value: true, enumerable: false });
+    return normalized;
+  }
+
+  function normalizeWaterInputOnce(data) {
     var input = data || {};
 
     return {
@@ -27781,46 +28900,24 @@
     );
   }
 
+  /* Status da temperatura = mesma tabela do arraçoamento (SENAR 2019, TechnicalEngine). */
   function classifyTemperature(input) {
     if (!input.hasTemperatureC) {
       return pendingParameter("temperatureC", "Temperatura da água", "°C");
     }
 
     var value = input.temperatureC;
+    var info = window.TechnicalEngine && typeof window.TechnicalEngine.feedingTemperatureInfo === "function"
+      ? window.TechnicalEngine.feedingTemperatureInfo(value)
+      : { factor: 1, message: "Motor técnico indisponível." };
 
-    if (value < 24 || value > 32) {
-      return buildParameterResult(
-        "temperatureC",
-        "Temperatura da água",
-        value,
-        "°C",
-        "critical",
-        "Crítico",
-        "Temperatura fora da faixa segura. Ajustar manejo alimentar e monitorar oxigênio."
-      );
+    if (info.factor === 0) {
+      return buildParameterResult("temperatureC", "Temperatura da água", value, "°C", "critical", "Crítico", info.message);
     }
-
-    if ((value >= 24 && value < 26) || (value > 30 && value <= 32)) {
-      return buildParameterResult(
-        "temperatureC",
-        "Temperatura da água",
-        value,
-        "°C",
-        "warning",
-        "Atenção",
-        "Temperatura fora da faixa ideal. Reduzir atenção ao arraçoamento e observar comportamento do lote."
-      );
+    if (info.factor < 1) {
+      return buildParameterResult("temperatureC", "Temperatura da água", value, "°C", "warning", "Atenção", info.message);
     }
-
-    return buildParameterResult(
-      "temperatureC",
-      "Temperatura da água",
-      value,
-      "°C",
-      "normal",
-      "Adequado",
-      "Temperatura em faixa adequada para manejo alimentar."
-    );
+    return buildParameterResult("temperatureC", "Temperatura da água", value, "°C", "normal", "Adequado", info.message);
   }
 
   function classifyOxygen(input) {
@@ -28111,12 +29208,13 @@
       return window.TechnicalEngine.feedingTemperatureFactor(input.temperatureC);
     }
 
+    /* Cópia de segurança da tabela do SENAR 2019 (usada só se o motor técnico não carregar). */
     var t = input.temperatureC;
     if (t < 16) return 0;
-    if (t < 20) return 0.5;
+    if (t < 20) return 0.6;
     if (t < 25) return 0.8;
-    if (t <= 30) return 1;
-    if (t <= 32) return 0.7;
+    if (t < 30) return 1;
+    if (t <= 32) return 0.8;
     return 0;
   }
 
@@ -29017,6 +30115,7 @@
   }
 
   window.AguaService = {
+    normalizeWaterInput: normalizeWaterInput,
     listPondsForWaterQuality: listPondsForWaterQuality,
 
     getWaterQualityById: getWaterQualityById,
@@ -30625,9 +31724,9 @@
   function translateFeedPhase(value) {
     var phase = normalizeFeedPhase(value);
 
-    if (phase === "larvas_alevinos") return "Larvas e Alevinos / Iniciantes";
-    if (phase === "juvenil_recria") return "Juvenil / Recria";
-    if (phase === "terminacao") return "Terminação";
+    if (phase === "larvas_alevinos") return "Larvicultura e alevinagem (até 30 g)";
+    if (phase === "juvenil_recria") return "Recria (30 a 250 g)";
+    if (phase === "terminacao") return "Engorda (acima de 250 g)";
 
     return phase ? normalizeText(value) : "Não informado";
   }
@@ -31581,7 +32680,11 @@
     ], 0);
 
     if (!mealsPerDay || mealsPerDay < 1) {
-      mealsPerDay = 2;
+      /* Sem tratos informados: tratos da faixa de peso (SENAR 2019 / Rodrigues 2013). */
+      var mealsBand = window.TechnicalEngine && typeof window.TechnicalEngine.feedingBand === "function"
+        ? window.TechnicalEngine.feedingBand(currentAverageWeightG)
+        : null;
+      mealsPerDay = mealsBand && mealsBand.meals ? mealsBand.meals : 0;
     }
 
     if (!recommendedFeedDayKg && currentBiomassKg > 0 && usedFeedingPercent > 0) {
@@ -33214,9 +34317,9 @@
   function translateFeedPhase(value) {
     var phase = normalizeFeedPhase(value);
 
-    if (phase === "larvas_alevinos") return "Larvas e Alevinos / Iniciantes";
-    if (phase === "juvenil_recria") return "Juvenil / Recria";
-    if (phase === "terminacao") return "Terminação";
+    if (phase === "larvas_alevinos") return "Larvicultura e alevinagem (até 30 g)";
+    if (phase === "juvenil_recria") return "Recria (30 a 250 g)";
+    if (phase === "terminacao") return "Engorda (acima de 250 g)";
 
     return phase ? normalizeText(value) : "Não informado";
   }
@@ -33359,9 +34462,9 @@
   function getFeedPhaseOptionsHtml() {
     return (
       '<option value="">Selecione a fase</option>' +
-      '<option value="larvas_alevinos">Larvas e Alevinos / Iniciantes</option>' +
-      '<option value="juvenil_recria">Juvenil / Recria</option>' +
-      '<option value="terminacao">Terminação</option>'
+      '<option value="larvas_alevinos">Larvicultura e alevinagem (até 30 g)</option>' +
+      '<option value="juvenil_recria">Recria (30 a 250 g)</option>' +
+      '<option value="terminacao">Engorda (acima de 250 g)</option>'
     );
   }
 
@@ -33407,44 +34510,33 @@
     }
   }
 
+  /* Guia gerado da TABELA ÚNICA do motor técnico (SENAR 2019 + Rodrigues 2013), com a fonte de cada linha. */
   function buildNutritionGuideHtml() {
+    var engine = window.TechnicalEngine;
+    var rows = engine && Array.isArray(engine.feedingTable) ? engine.feedingTable : [];
+    var temps = engine && Array.isArray(engine.temperatureTable) ? engine.temperatureTable : [];
+    var body = rows.map(function (b) {
+      return "<tr><td>" + escapeHtml(b.stage) + "</td><td>" + escapeHtml(b.weightLabel) + "</td><td>" + escapeHtml(b.percentText) + "</td><td>" + escapeHtml(b.mealsText) +
+        "</td><td>" + escapeHtml(b.proteinText) + "</td><td>" + escapeHtml(b.pelletText) + "</td><td>" + (b.fcr === null ? "—" : b.fcr.toFixed(1).replace(".", ",")) + "</td><td>" + escapeHtml(b.source) + "</td></tr>";
+    }).join("");
+    var tempList = [
+      "abaixo de 16 °C: não fornecer", "16 a 19 °C: 60%", "20 a 24 °C: 80%", "25 a 29 °C: 100%", "30 a 32 °C: 80%", "acima de 32 °C: não fornecer"
+    ].join(" · ");
     return (
       '<section id="feedingNutritionGuide" class="page-card feeding-nutrition-guide">' +
         '<div class="toolbar">' +
           '<div class="toolbar-title">' +
             '<h3>Guia técnico de arraçoamento da tilápia</h3>' +
-            '<span>Referência prática para fase produtiva, tipo físico, proteína e granulometria da ração.</span>' +
+            '<span>Viveiro escavado. Fases pelo peso: alevinagem até 30 g, recria de 30 a 250 g, engorda acima de 250 g.</span>' +
           '</div>' +
         '</div>' +
-
-        '<div class="nutrition-guide-grid">' +
-          '<article class="nutrition-guide-card">' +
-            '<h4>Larvas e Alevinos / Iniciantes</h4>' +
-            '<p><strong>Tamanho do peixe:</strong> 1 g a 30 g.</p>' +
-            '<p><strong>Tipo físico:</strong> pó, farelada ou microextrusada.</p>' +
-            '<p><strong>Granulometria:</strong> microextrusada de 0,8 mm a 1,7 mm quando aplicável.</p>' +
-            '<p><strong>Proteína:</strong> 40% a 50%.</p>' +
-            '<p><strong>Manejo:</strong> exige dieta altamente proteica e maior frequência de trato diário.</p>' +
-          '</article>' +
-
-          '<article class="nutrition-guide-card">' +
-            '<h4>Juvenil / Recria</h4>' +
-            '<p><strong>Tamanho do peixe:</strong> 30 g a 100 g.</p>' +
-            '<p><strong>Tipo físico:</strong> extrusada.</p>' +
-            '<p><strong>Granulometria:</strong> 2,0 mm a 3,0 mm.</p>' +
-            '<p><strong>Proteína:</strong> 36% a 40%.</p>' +
-            '<p><strong>Manejo:</strong> a biometria evita desuniformidade e ajusta o consumo real do lote.</p>' +
-          '</article>' +
-
-          '<article class="nutrition-guide-card">' +
-            '<h4>Terminação</h4>' +
-            '<p><strong>Tamanho do peixe:</strong> acima de 100 g até o abate.</p>' +
-            '<p><strong>Tipo físico:</strong> extrusada.</p>' +
-            '<p><strong>Granulometria:</strong> 4,0 mm a 7,0 mm.</p>' +
-            '<p><strong>Proteína:</strong> 32% a 36%.</p>' +
-            '<p><strong>Manejo:</strong> a transição de granulometria deve ser gradual conforme biometria, consumo e resposta alimentar.</p>' +
-          '</article>' +
+        '<div class="table-wrapper" style="overflow-x:auto">' +
+          '<table class="data-table"><thead><tr><th>Fase</th><th>Peso</th><th>Ração por dia</th><th>Tratos/dia</th><th>Proteína bruta</th><th>Ração</th><th>CA esperada</th><th>Fonte</th></tr></thead>' +
+          '<tbody>' + body + '</tbody></table>' +
         '</div>' +
+        '<p class="technical-note"><strong>Ajuste pela temperatura da água (SENAR 2019):</strong> ' + escapeHtml(tempList) + ' da ração calculada.' + (temps.length ? '' : '') + '</p>' +
+        '<p class="technical-note">Fontes: SENAR. Piscicultura: alimentação (Coleção SENAR 263, 2019), para tilápia em viveiro escavado a 25–28 °C. ' +
+          'Rodrigues, Bergamin e Santos (2013, p. 183), para larvicultura e faixas de proteína por fase; segundo a própria fonte, os valores variam com a espécie, o sistema e a densidade.</p>' +
       '</section>'
     );
   }
@@ -35051,45 +36143,63 @@
 /* ===== js/services/racao-tecnica-service-v4-senar-furuya.js ===== */
 /*
   AquaGest Pro
-  Arquivo: js/services/racao-tecnica-service-v4-senar-furuya.js
-  Função: tabela nutricional ÚNICA da tilápia (fase, faixa de peso, PB mínima e máxima,
-  granulometria e tipo físico), usada por arraçoamento, estoque e motor técnico.
-
-  - As fases usam os mesmos códigos do cadastro do estoque:
-    larvas_alevinos, juvenil_recria, terminacao.
-  - O valor de Furuya (TechnicalEngine.feedProfile) é só uma referência exibida;
-    a avaliação usa a faixa mínima/máxima da tabela.
+  Arquivo: js/services/racao-tecnica-service-v4-senar-furuya.js (nome mantido por compatibilidade)
+  Função: perfil nutricional da ração da tilápia (fase, PB, granulometria) a partir da
+  TABELA ÚNICA do motor técnico (TechnicalEngine.feedingTable):
+  - SENAR 2019 (Coleção SENAR 263) para 1 g em diante;
+  - Rodrigues, Bergamin e Santos (2013) para larvicultura (< 1 g) e faixas de PB por fase.
+  A referência "Furuya" foi retirada: os valores não puderam ser conferidos na fonte.
+  Desvios geram "Atenção" (nenhuma fonte define gravidade crítica para perfil de ração).
 */
 (function () {
   "use strict";
 
   var PHASE_LABELS = {
-    larvas_alevinos: "Larvas e Alevinos / Iniciantes",
-    juvenil_recria: "Juvenil / Recria",
-    terminacao: "Terminação"
+    larvas_alevinos: "Larvicultura e alevinagem (até 30 g)",
+    juvenil_recria: "Recria (30 a 250 g)",
+    terminacao: "Engorda (acima de 250 g)"
   };
 
   var PHASE_NOTES = {
-    larvas_alevinos: "Exigem dietas altamente proteicas e maior frequência de trato diário.",
-    juvenil_recria: "A biometria é fundamental para ajustar a ração e reduzir desigualdade de crescimento.",
-    terminacao: "A transição de granulometria deve ser gradual conforme crescimento, consumo e biometria."
+    larvas_alevinos: "Ração farelada (pó) até 5 g e muitos tratos ao dia; reajustar a ração dos alevinos a cada 3 a 4 dias (SENAR 2019).",
+    juvenil_recria: "Ajustar a ração pela biometria; verificar sobras e reduzir a refeição seguinte quando houver (SENAR 2019).",
+    terminacao: "Dois tratos ao dia; trocar a granulometria de forma gradual conforme o peso (SENAR 2019)."
   };
 
-  var TILAPIA_FEED_PROFILE_TABLE = [
-    { phase: "larvas_alevinos", bandLabel: "Pós-larva", minWeightG: 0, maxWeightG: 1, weightLabel: "até 1 g", proteinMinPercent: 45, proteinMaxPercent: 50, pelletMinMm: 0.3, pelletMaxMm: 0.8, physicalTypes: ["po", "farelada", "microextrusada"] },
-    { phase: "larvas_alevinos", bandLabel: "Alevino inicial", minWeightG: 1, maxWeightG: 5, weightLabel: "1 g a 5 g", proteinMinPercent: 40, proteinMaxPercent: 45, pelletMinMm: 0.8, pelletMaxMm: 1.2, physicalTypes: ["po", "farelada", "microextrusada"] },
-    { phase: "larvas_alevinos", bandLabel: "Alevino", minWeightG: 5, maxWeightG: 30, weightLabel: "5 g a 30 g", proteinMinPercent: 36, proteinMaxPercent: 40, pelletMinMm: 1.2, pelletMaxMm: 2, physicalTypes: ["microextrusada", "extrusada"] },
-    { phase: "juvenil_recria", bandLabel: "Juvenil / recria", minWeightG: 30, maxWeightG: 100, weightLabel: "30 g a 100 g", proteinMinPercent: 32, proteinMaxPercent: 36, pelletMinMm: 2, pelletMaxMm: 3, physicalTypes: ["extrusada"] },
-    { phase: "terminacao", bandLabel: "Crescimento", minWeightG: 100, maxWeightG: 300, weightLabel: "100 g a 300 g", proteinMinPercent: 28, proteinMaxPercent: 32, pelletMinMm: 3, pelletMaxMm: 4, physicalTypes: ["extrusada"] },
-    { phase: "terminacao", bandLabel: "Engorda", minWeightG: 300, maxWeightG: 600, weightLabel: "300 g a 600 g", proteinMinPercent: 28, proteinMaxPercent: 32, pelletMinMm: 4, pelletMaxMm: 6, physicalTypes: ["extrusada"] },
-    { phase: "terminacao", bandLabel: "Terminação", minWeightG: 600, maxWeightG: 999999, weightLabel: "acima de 600 g", proteinMinPercent: 26, proteinMaxPercent: 30, pelletMinMm: 6, pelletMaxMm: 8, physicalTypes: ["extrusada"] }
-  ].map(function (row) {
-    row.phaseLabel = PHASE_LABELS[row.phase];
-    row.managementNote = PHASE_NOTES[row.phase];
-    row.pelletLabel = row.pelletMinMm + " a " + row.pelletMaxMm + " mm";
-    row.physicalTypesLabel = row.physicalTypes.map(translatePhysicalType).join(", ");
-    return row;
-  });
+  var POWDER_TYPES = ["po", "farelada"];
+
+  function engineTable() {
+    return window.TechnicalEngine && Array.isArray(window.TechnicalEngine.feedingTable) ? window.TechnicalEngine.feedingTable : [];
+  }
+
+  function toProfile(band) {
+    return {
+      phase: band.phase,
+      phaseLabel: PHASE_LABELS[band.phase],
+      bandLabel: band.stage,
+      minWeightG: band.min,
+      maxWeightG: band.max,
+      weightLabel: band.weightLabel,
+      proteinMinPercent: band.proteinMin,
+      proteinMaxPercent: band.proteinMax,
+      proteinReferencePercent: band.proteinReference,
+      pelletMinMm: band.pelletMin,
+      pelletMaxMm: band.pelletMax,
+      pelletLabel: band.pelletText,
+      powder: !!band.powder,
+      physicalTypes: band.powder ? POWDER_TYPES.slice() : [],
+      physicalTypesLabel: band.powder ? "Pó, Farelada" : "Pelete (" + band.pelletText + ")",
+      feedingPercent: band.percent,
+      feedingPercentLabel: band.percentText,
+      mealsPerDay: band.meals,
+      mealsLabel: band.mealsText,
+      expectedFcr: band.fcr,
+      source: band.source,
+      managementNote: PHASE_NOTES[band.phase]
+    };
+  }
+
+  var TILAPIA_FEED_PROFILE_TABLE = engineTable().map(toProfile);
 
   function toNumber(value, fallback) {
     /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
@@ -35098,7 +36208,7 @@
     var fb = fallback === undefined ? 0 : fallback;
     if (value === null || value === undefined || value === "") return fb;
     if (typeof value === "number") return Number.isFinite(value) ? value : fb;
-    var text = String(value).trim().replace(/[\s ]/g, "");
+    var text = String(value).trim().replace(/[\s ]/g, "");
     if (!text) return fb;
     if (text.indexOf(",") >= 0) text = text.replace(/\./g, "").replace(",", ".");
     var parsed = Number(text);
@@ -35119,7 +36229,7 @@
   function normalizePhase(value) {
     var text = normalizeSearch(value);
     if (!text) return "";
-    if (["larvas_alevinos", "larva", "larvas", "alevino", "alevinos", "iniciante", "iniciantes", "pos_larva", "alevino_inicial", "reversao"].indexOf(text) >= 0) return "larvas_alevinos";
+    if (["larvas_alevinos", "larva", "larvas", "alevino", "alevinos", "alevinagem", "larvicultura", "iniciante", "iniciantes", "pos_larva", "alevino_inicial", "reversao"].indexOf(text) >= 0) return "larvas_alevinos";
     if (["juvenil_recria", "juvenil", "juvenis", "recria", "pos_reversao"].indexOf(text) >= 0) return "juvenil_recria";
     if (["terminacao", "finalizacao", "engorda", "crescimento"].indexOf(text) >= 0) return "terminacao";
     return text;
@@ -35155,7 +36265,7 @@
     if (!weight) return null;
     return TILAPIA_FEED_PROFILE_TABLE.find(function (item) {
       return weight >= item.minWeightG && weight < item.maxWeightG;
-    }) || TILAPIA_FEED_PROFILE_TABLE[TILAPIA_FEED_PROFILE_TABLE.length - 1];
+    }) || TILAPIA_FEED_PROFILE_TABLE[TILAPIA_FEED_PROFILE_TABLE.length - 1] || null;
   }
 
   function classifyFeedProfile(data) {
@@ -35182,60 +36292,55 @@
       };
     }
 
-    /* Referência de Furuya: apenas informativa. */
-    var reference = window.TechnicalEngine && typeof window.TechnicalEngine.feedProfile === "function"
-      ? window.TechnicalEngine.feedProfile(averageWeightG)
-      : null;
-
     var severity = "normal";
     var recommendations = [];
+    var sourceText = " Fonte: " + recommended.source + ".";
 
-    function addIssue(level, title, message) {
-      if (level === "critical") severity = "critical";
-      else if (level === "warning" && severity !== "critical") severity = "warning";
-      recommendations.push({ severity: level, title: title, message: message });
+    function addIssue(title, message) {
+      severity = "warning";
+      recommendations.push({ severity: "warning", title: title, message: message + sourceText });
     }
 
     if (feedPhase && feedPhase !== recommended.phase) {
-      addIssue("warning", "Fase da ração", "A fase informada não corresponde à fase sugerida pelo peso médio atual (" + recommended.phaseLabel + ").");
+      addIssue("Fase da ração", "A fase informada não corresponde à fase pelo peso médio atual (" + recommended.phaseLabel + ").");
     }
 
-    if (feedPhysicalType && recommended.physicalTypes.indexOf(feedPhysicalType) < 0) {
-      addIssue("warning", "Tipo físico da ração", "O tipo físico informado não é o mais indicado para o peso atual (" + recommended.physicalTypesLabel + ").");
+    var isPowder = POWDER_TYPES.indexOf(feedPhysicalType) >= 0;
+    if (feedPhysicalType) {
+      if (recommended.powder && !isPowder) {
+        addIssue("Tipo físico da ração", "Para " + recommended.weightLabel + " a fonte indica ração " + recommended.pelletLabel + ".");
+      } else if (!recommended.powder && isPowder) {
+        addIssue("Tipo físico da ração", "Para " + recommended.weightLabel + " a fonte indica pelete de " + recommended.pelletLabel + ".");
+      }
     }
 
     if (crudeProteinPercent > 0) {
-      if (crudeProteinPercent < recommended.proteinMinPercent) {
-        addIssue(crudeProteinPercent <= recommended.proteinMinPercent - 4 ? "critical" : "warning", "Proteína bruta",
-          "Proteína bruta abaixo da faixa recomendada (" + recommended.proteinMinPercent + "% a " + recommended.proteinMaxPercent + "%).");
-      } else if (crudeProteinPercent > recommended.proteinMaxPercent) {
-        addIssue("warning", "Proteína bruta",
-          "Proteína bruta acima da faixa recomendada (" + recommended.proteinMinPercent + "% a " + recommended.proteinMaxPercent + "%). Pode elevar custo sem ganho proporcional.");
+      if (crudeProteinPercent < recommended.proteinMinPercent || crudeProteinPercent > recommended.proteinMaxPercent) {
+        addIssue("Proteína bruta", "Proteína bruta fora da faixa para " + recommended.weightLabel + " (" + recommended.proteinMinPercent + "% a " + recommended.proteinMaxPercent + "%" +
+          (recommended.proteinReferencePercent ? "; SENAR: " + recommended.proteinReferencePercent + "%" : "") + ").");
       }
     } else {
-      addIssue("warning", "Proteína bruta", "Proteína bruta da ração não informada.");
+      recommendations.push({ severity: "warning", title: "Proteína bruta", message: "Proteína bruta da ração não informada." });
+      severity = "warning";
     }
 
-    var pelletOptional = recommended.phase === "larvas_alevinos" && (feedPhysicalType === "po" || feedPhysicalType === "farelada");
-    if (!pelletOptional) {
+    var pelletApplies = recommended.pelletMinMm !== null && recommended.pelletMaxMm !== null && !isPowder;
+    if (pelletApplies) {
       if (pelletSizeMm > 0) {
         if (pelletSizeMm < recommended.pelletMinMm || pelletSizeMm > recommended.pelletMaxMm) {
-          var distance = Math.min(Math.abs(pelletSizeMm - recommended.pelletMinMm), Math.abs(pelletSizeMm - recommended.pelletMaxMm));
-          addIssue(distance >= 2 ? "critical" : "warning", "Granulometria",
-            "Granulometria fora da faixa sugerida para o peso médio do lote (" + recommended.pelletLabel + ").");
+          addIssue("Granulometria", "Granulometria fora da faixa para " + recommended.weightLabel + " (" + recommended.pelletLabel + ").");
         }
       } else {
-        addIssue("warning", "Granulometria", "Granulometria da ração não informada.");
+        recommendations.push({ severity: "warning", title: "Granulometria", message: "Granulometria da ração não informada." });
+        severity = "warning";
       }
     }
 
     if (!recommendations.length) {
-      recommendations.push({ severity: "normal", title: "Perfil nutricional", message: "Fase, proteína bruta e granulometria estão coerentes com o peso médio informado." });
+      recommendations.push({ severity: "normal", title: "Perfil nutricional", message: "Fase, proteína bruta e granulometria coerentes com o peso médio." + sourceText });
     }
 
-    var status = severity === "critical" ? "Crítico — perfil nutricional inadequado"
-      : severity === "warning" ? "Atenção — revisar perfil da ração"
-        : "Perfil da ração adequado";
+    var status = severity === "warning" ? "Atenção — revisar perfil da ração" : "Perfil da ração adequado";
 
     return {
       recommendedFeedPhase: recommended.phase,
@@ -35250,8 +36355,8 @@
       recommendedPelletMaxMm: recommended.pelletMaxMm,
       recommendedPelletLabel: recommended.pelletLabel,
       recommendedManagementNote: recommended.managementNote,
-      referenceProteinPercent: reference ? reference.crudeProteinPercent : null,
-      referenceSource: reference ? reference.source : "",
+      referenceProteinPercent: recommended.proteinReferencePercent,
+      referenceSource: recommended.source,
       feedPhase: feedPhase,
       feedPhaseLabel: translatePhase(feedPhase),
       feedPhysicalType: feedPhysicalType,
@@ -35260,8 +36365,7 @@
       pelletSizeMm: round(pelletSizeMm, 2),
       feedProfileStatus: status,
       feedProfileSeverity: severity,
-      feedProfileMessage: recommendations.map(function (item) { return item.message; }).join(" ") +
-        (reference ? " Referência de proteína (" + reference.source + "): " + String(reference.crudeProteinPercent).replace(".", ",") + "% PB." : ""),
+      feedProfileMessage: recommendations.map(function (item) { return item.message; }).join(" "),
       feedProfileRecommendations: recommendations
     };
   }
@@ -37317,7 +38421,8 @@
     var text = typeof value === "number" && Number.isFinite(value)
       ? String(value).replace(".", ",")
       : String(value === null || value === undefined ? "" : value);
-    return '"' + text.replace(/"/g, '""') + '"';
+    /* Aspas só quando necessário (separador, aspas ou quebra de linha). */
+    return /[;"\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
   }
 
   function toCsv(rows) {
@@ -37509,21 +38614,70 @@
     return concatenate([localData, centralData, end]);
   }
 
-  function createXlsx(rows, title) {
-    var rawTitle = cleanText(title || "Relatório técnico do ciclo").replace(/[\\/*?:\[\]]/g, " ");
-    var sheetTitle = (rawTitle || "Relatório").slice(0, 31);
+  /* Pasta de trabalho .xlsx real com várias abas: sheets = [{ name, rows: [[...], ...] }]. */
+  function createXlsxWorkbook(sheets, title) {
+    var list = (Array.isArray(sheets) && sheets.length ? sheets : [{ name: title || "Relatório", rows: [[""]] }]).map(function (sheet, index) {
+      var raw = cleanText(sheet.name || ("Aba " + (index + 1))).replace(/[\\/*?:\[\]]/g, " ");
+      return { name: (raw || ("Aba " + (index + 1))).slice(0, 31), rows: sheet.rows };
+    });
+    var used = {};
+    list.forEach(function (sheet, index) {
+      var base = sheet.name, name = base, k = 2;
+      while (used[name.toLowerCase()]) { name = base.slice(0, 28) + " " + k; k += 1; }
+      used[name.toLowerCase()] = true;
+      sheet.name = name;
+      sheet.index = index + 1;
+    });
     var files = {
-      "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>',
+      "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' + list.map(function (sh) { return '<Override PartName="/xl/worksheets/sheet' + sh.index + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join("") + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>',
       "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>',
-      "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView visibility="visible" minimized="0" showHorizontalScroll="1" showVerticalScroll="1" showSheetTabs="1" activeTab="0"/></bookViews><sheets><sheet name="' + xmlEscape(sheetTitle) + '" sheetId="1" state="visible" r:id="rId1"/></sheets><definedNames/><calcPr calcId="124519" fullCalcOnLoad="1"/></workbook>',
-      "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>',
+      "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView visibility="visible" minimized="0" showHorizontalScroll="1" showVerticalScroll="1" showSheetTabs="1" activeTab="0"/></bookViews><sheets>' + list.map(function (sh) { return '<sheet name="' + xmlEscape(sh.name) + '" sheetId="' + sh.index + '" state="visible" r:id="rId' + sh.index + '"/>'; }).join("") + '</sheets><definedNames/><calcPr calcId="124519" fullCalcOnLoad="1"/></workbook>',
+      "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + list.map(function (sh) { return '<Relationship Id="rId' + sh.index + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet' + sh.index + '.xml"/>'; }).join("") + '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdTheme" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>',
       "xl/theme/theme1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AquaGest Lite"><a:themeElements><a:clrScheme name="AquaGest"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="0B4F6C"/></a:accent1><a:accent2><a:srgbClr val="075E59"/></a:accent2><a:accent3><a:srgbClr val="2A9D8F"/></a:accent3><a:accent4><a:srgbClr val="7AA6C2"/></a:accent4><a:accent5><a:srgbClr val="8AB17D"/></a:accent5><a:accent6><a:srgbClr val="E9C46A"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="AquaGest"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="AquaGest"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>',
-      "xl/worksheets/sheet1.xml": worksheetXml(rows),
       "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="0"/><fonts count="1"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font></fonts><fills count="2"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" pivotButton="0" quotePrefix="0" xfId="0"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0" hidden="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
       "docProps/core.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEscape(title || "Relatório AquaGest Lite") + '</dc:title><dc:creator>AquaGest Lite</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00Z</dcterms:created></cp:coreProperties>',
       "docProps/app.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>AquaGest Lite</Application><AppVersion>1.0</AppVersion></Properties>'
     };
+    list.forEach(function (sh) { files["xl/worksheets/sheet" + sh.index + ".xml"] = worksheetXml(sh.rows); });
     return createZip(files);
+  }
+
+  function createXlsx(rows, title) {
+    return createXlsxWorkbook([{ name: cleanText(title || "Relatório técnico do ciclo") || "Relatório", rows: rows }], title);
+  }
+
+  /* Nome de arquivo: AquaGest_<fazenda>_<assunto>_<data local>.ext */
+  function fileStamp(farmName, subject, extension) {
+    var clean = function (text) {
+      return String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+    };
+    var d = new Date();
+    var date = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    return ["AquaGest", clean(farmName), clean(subject), date].filter(Boolean).join("_") + "." + extension;
+  }
+
+  function downloadBytes(filename, bytes, type) {
+    var blob = new Blob([bytes], { type: type });
+    var url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+  }
+
+  function downloadWorkbook(filename, sheets, title) {
+    downloadBytes(filename, createXlsxWorkbook(sheets, title), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  }
+
+  /* CSV a partir de linhas em matriz ([[cabeçalho...], [valores...]]). */
+  function matrixToCsv(rows) {
+    return (rows || []).map(function (row) { return (row || []).map(csvValue).join(";"); }).join("\r\n");
+  }
+
+  function downloadMatrixCsv(filename, rows) {
+    downloadBytes(filename, "\ufeff" + matrixToCsv(rows), "text/csv;charset=utf-8");
   }
 
   function downloadExcel(filename, title, html) {
@@ -37700,6 +38854,11 @@
     toCsv: toCsv,
     toSpreadsheetRows: toSpreadsheetRows,
     createXlsx: createXlsx,
+    createXlsxWorkbook: createXlsxWorkbook,
+    downloadWorkbook: downloadWorkbook,
+    downloadMatrixCsv: downloadMatrixCsv,
+    matrixToCsv: matrixToCsv,
+    fileStamp: fileStamp,
     createPdf: createPdf,
     downloadCsv: downloadCsv,
     downloadExcel: downloadExcel,
@@ -39424,6 +40583,241 @@
 
 ;
 
+/* ===== js/ui/exportacao-ui.js ===== */
+/*
+  AquaGest Pro — exportação.
+  - "Excel geral": um arquivo .xlsx com aba de resumo e uma aba por módulo.
+  - Botões "Excel" e "CSV" em cada tela, para a tabela daquele módulo.
+  - Cartão "Relatórios e exportação" na tela de Relatórios.
+  Mecanismo: .xlsx real (RelatoriosExportService), números como números, CSV com ";" e vírgula decimal.
+  Nome do arquivo: AquaGest_<fazenda>_<assunto>_<data>.
+*/
+(function () {
+  "use strict";
+
+  function num(v) { return window.AquaGestNumber ? window.AquaGestNumber.parse(v) : Number(v) || 0; }
+  function txt(v) { return v === null || v === undefined ? "" : String(v); }
+  function brDate(iso) { var s = txt(iso).slice(0, 10).split("-"); return s.length === 3 && s[0].length === 4 ? s[2] + "/" + s[1] + "/" + s[0] : txt(iso); }
+  function n(key) { return function (r) { var v = r[key]; return v === null || v === undefined || v === "" ? "" : num(v); }; }
+  function t(key) { return function (r) { return txt(r[key]); }; }
+  function d(key) { return function (r) { return brDate(r[key]); }; }
+  function any(keys) { return function (r) { for (var i = 0; i < keys.length; i += 1) { if (r[keys[i]] !== undefined && r[keys[i]] !== null && r[keys[i]] !== "") return txt(r[keys[i]]); } return ""; }; }
+  function statusLabel(v) { return ({ active: "Ativo", inactive: "Inativo", maintenance: "Manutenção", closed: "Encerrado" })[v] || txt(v); }
+
+  var MODULES = [
+    { key: "viveiros", title: "Viveiros", store: "ponds", screen: "viveiros", columns: [
+      ["Viveiro", t("name")], ["Estrutura", t("structureType")], ["Área (m²)", n("areaM2")], ["Profundidade média (m)", n("averageDepthM")], ["Volume (m³)", n("volumeM3")],
+      ["Capacidade (kg/m²)", n("maxDensityKgM2")], ["Densidade máxima (kg/m³)", n("maxDensityKgM3")], ["Biomassa máxima (kg)", n("maxBiomassKg")],
+      ["Aeradores", n("aeratorCount")], ["Potência total de aeração (CV)", n("aerationPowerHp")], ["Situação", function (r) { return statusLabel(r.status); }]] },
+    { key: "lotes", title: "Lotes", store: "production_cycles", screen: "producao", tab: "lotes", columns: [
+      ["Viveiro", t("pondName")], ["Espécie", t("species")], ["Categoria", t("category")], ["Fornecedor", t("supplier")], ["Povoamento", d("startDate")],
+      ["Peixes iniciais", n("quantityInitial")], ["Peso inicial (g)", n("initialAverageWeightG")], ["Peixes atuais", n("currentQuantity")], ["Peso atual (g)", n("currentAverageWeightG")],
+      ["Biomassa atual (kg)", n("currentBiomassKg")], ["Peso de abate (g)", n("targetWeightG")], ["Ciclo planejado (dias)", n("plannedCycleDays")], ["Ração acumulada (kg)", n("feedTotalKg")],
+      ["Situação", function (r) { return statusLabel(r.status); }]] },
+    { key: "movimentacao", title: "Movimentação de peixes", store: "mortality_records", screen: "producao", tab: "mov", columns: [
+      ["Data", d("date")], ["Tipo", function (r) { var S = window.FishMovementService; var k = S ? S.normalizeType(r.movementType) : r.movementType; return S && S.TYPES[k] ? S.TYPES[k].label : txt(r.movementType); }],
+      ["Peixes", n("quantity")], ["Peso médio (g)", n("averageWeightG")], ["Biomassa (kg)", function (r) { return window.FishMovementService ? Math.round(window.FishMovementService.biomassOf(r) * 100) / 100 : ""; }],
+      ["Origem", function (r) { return r.source === "sanidade" ? "Sanidade" : "Manual"; }], ["Observações", t("notes")]] },
+    { key: "biometrias", title: "Biometrias", store: "biometries", screen: "biometria", columns: [
+      ["Data", d("date")], ["Viveiro", t("pondName")], ["Peixes amostrados", n("sampleCount")], ["Peso médio (g)", n("averageWeightG")], ["Peixes vivos", n("currentPopulation")],
+      ["Biomassa (kg)", n("currentBiomassKg")], ["GPD (g/dia)", n("gpdGDay")], ["Ração do período (kg)", n("feedPeriodKg")], ["Ração acumulada (kg)", n("feedTotalKg")],
+      ["CA do período", n("fcrPeriod")], ["CA acumulada", n("fcrTotal")], ["Sobrevivência (%)", n("survivalPercent")], ["Temperatura (°C)", n("temperatureC")], ["TGC do ciclo", n("cycleTgc")],
+      ["% PV usado", n("usedFeedingPercent")], ["Ração recomendada (kg/dia)", n("recommendedFeedDayKg")], ["Tratos/dia", n("mealsPerDay")], ["Situação técnica", t("technicalStatus")]] },
+    { key: "agua", title: "Qualidade da água", store: "water_quality", screen: "agua", columns: [
+      ["Data", d("date")], ["Hora", t("time")], ["Viveiro", t("pondName")], ["Temperatura (°C)", n("temperatureC")], ["OD (mg/L)", n("dissolvedOxygenMgL")], ["pH", n("ph")],
+      ["Amônia total (mg/L)", n("ammoniaTotalMgL")], ["NH3 (mg/L)", n("nh3MgL")], ["Nitrito (mg/L)", n("nitriteMgL")], ["Alcalinidade (mg/L)", n("alkalinityMgL")],
+      ["Situação", t("technicalStatus")], ["Ação na ração", t("recommendedFeedingAction")]] },
+    { key: "arracoamento", title: "Arraçoamento", store: "feeding_records", screen: "arracoamento", columns: [
+      ["Data", d("date")], ["Hora", t("time")], ["Viveiro", t("pondName")], ["Ração", any(["inventoryItemName", "feedName"])], ["Fase", t("feedPhaseLabel")], ["PB (%)", n("crudeProteinPercent")],
+      ["Pelete (mm)", n("pelletSizeMm")], ["Recomendado ajustado (kg/dia)", n("adjustedRecommendedFeedDayKg")], ["Fornecido (kg)", n("feedProvidedKg")], ["Sobra (kg)", n("feedWasteKg")],
+      ["Desvio (%)", n("deviationPercent")], ["Tratos realizados", n("mealsPerformed")]] },
+    { key: "sanidade", title: "Sanidade", store: "health_records", screen: "sanidade", columns: [
+      ["Data", d("date")], ["Viveiro", function (r, ctx) { return ctx.pondNames[r.pondId] || ""; }], ["Ocorrência", t("occurrenceType")], ["Gravidade", t("severity")], ["Sinais", t("signs")],
+      ["Diagnóstico", t("diagnosis")], ["Tratamento", t("treatment")], ["Medicamento", t("medication")], ["Mortalidade", n("mortalityCount")]] },
+    { key: "estoque", title: "Estoque", store: "inventory", screen: "estoque", columns: [
+      ["Item", any(["itemName", "name"])], ["Categoria", t("categoryLabel")], ["Unidade", t("unit")], ["Fase", t("feedPhaseLabel")], ["PB (%)", n("crudeProteinPercent")], ["Pelete (mm)", n("pelletSizeMm")],
+      ["Saldo", n("currentStock")], ["Custo médio (R$)", n("averageCost")], ["Valor em estoque (R$)", n("stockValue")], ["Estoque mínimo", n("minimumStock")], ["Validade", d("expirationDate")], ["Situação", t("stockStatus")]] },
+    { key: "estoque_mov", title: "Movimentos de estoque", store: "inventory_movements", columns: [
+      ["Data", d("date")], ["Item", any(["itemName", "inventoryItemName"])], ["Tipo", any(["movementTypeLabel", "movementType"])], ["Quantidade", n("quantity")], ["Custo unitário (R$)", n("unitCost")],
+      ["Custo total (R$)", n("totalCost")], ["Saldo após", n("newStock")], ["Observações", t("notes")]] },
+    { key: "financeiro", title: "Financeiro", store: "financial_transactions", screen: "financeiro", columns: [
+      ["Tipo", any(["transactionTypeLabel", "transactionType"])], ["Descrição", t("description")], ["Categoria", any(["categoryLabel", "category"])], ["Valor (R$)", n("amount")],
+      ["Competência", d("competenceDate")], ["Vencimento", d("dueDate")], ["Liquidação", d("settlementDate")], ["Situação", any(["statusLabel", "status"])],
+      ["Conta", function (r, ctx) { return ctx.accountNames[r.accountId] || ""; }], ["Viveiro", t("pondName")]] }
+  ];
+
+  function propertyId() {
+    try { return window.AuthService && window.AuthService.getCurrentPropertyId ? window.AuthService.getCurrentPropertyId() : null; } catch (e) { return null; }
+  }
+
+  function isActive(record) {
+    var status = txt(record && record.status).toLowerCase();
+    return !!record && record.deleted !== true && status !== "voided" && status !== "deleted";
+  }
+
+  async function readStore(store) {
+    if (!window.database) throw new Error("Banco local não carregado.");
+    var pid = propertyId();
+    var all = (await window.database.getAll(store)) || [];
+    return all.filter(function (r) { return isActive(r) && (!pid || !r.propertyId || r.propertyId === pid); });
+  }
+
+  async function buildContext() {
+    var ctx = { pondNames: {}, accountNames: {} };
+    try { (await readStore("ponds")).forEach(function (p) { ctx.pondNames[p.id] = p.name; }); } catch (e) { /* sem viveiros */ }
+    try { (await readStore("financial_accounts")).forEach(function (a) { ctx.accountNames[a.id] = a.accountName || a.name; }); } catch (e) { /* sem contas */ }
+    return ctx;
+  }
+
+  async function moduleRows(module, ctx) {
+    var records = await readStore(module.store);
+    records.sort(function (a, b) { return txt(a.date || a.startDate || a.name || a.itemName).localeCompare(txt(b.date || b.startDate || b.name || b.itemName)); });
+    var header = module.columns.map(function (c) { return c[0]; });
+    return [header].concat(records.map(function (r) { return module.columns.map(function (c) { return c[1](r, ctx); }); }));
+  }
+
+  async function currentProperty() {
+    try { return window.PisciculturaService && window.PisciculturaService.getCurrentProperty ? (await window.PisciculturaService.getCurrentProperty()) || {} : {}; } catch (e) { return {}; }
+  }
+
+  async function summaryRows(property) {
+    var ponds = await readStore("ponds").catch(function () { return []; });
+    var cycles = await readStore("production_cycles").catch(function () { return []; });
+    var activeCycles = cycles.filter(function (c) { return ["closed", "encerrado", "finalizado"].indexOf(txt(c.status).toLowerCase()) < 0; });
+    var feeding = await readStore("feeding_records").catch(function () { return []; });
+    var movements = await readStore("mortality_records").catch(function () { return []; });
+    var transactions = await readStore("financial_transactions").catch(function () { return []; });
+    var sum = function (list, fn) { return Math.round(list.reduce(function (a, x) { return a + fn(x); }, 0) * 100) / 100; };
+    var settled = function (tx) { var s = txt(tx.status).toLowerCase(); return s === "received" || s === "paid" || s === "recebido" || s === "pago" || !!tx.settlementDate; };
+    var income = sum(transactions.filter(function (x) { return txt(x.transactionType).toLowerCase() === "income" && settled(x); }), function (x) { return num(x.amount); });
+    var expense = sum(transactions.filter(function (x) { return txt(x.transactionType).toLowerCase() === "expense" && settled(x); }), function (x) { return num(x.amount); });
+    var now = new Date();
+    return [
+      ["Indicador", "Valor"],
+      ["Piscicultura", txt(property.name)],
+      ["Responsável", txt(property.ownerName)],
+      ["Município/UF", [property.city, property.state].filter(Boolean).join(" / ")],
+      ["Sistema de cultivo", txt(property.systemType)],
+      ["Viveiros cadastrados", ponds.length],
+      ["Viveiros ativos", ponds.filter(function (p) { return txt(p.status) === "active"; }).length],
+      ["Lotes ativos", activeCycles.length],
+      ["Peixes nos lotes ativos", sum(activeCycles, function (c) { return num(c.currentQuantity); })],
+      ["Biomassa estimada nos lotes ativos (kg)", sum(activeCycles, function (c) { return num(c.currentBiomassKg); })],
+      ["Ração fornecida registrada no arraçoamento (kg)", sum(feeding, function (f) { return num(f.feedProvidedKg); })],
+      ["Mortalidade registrada em movimentação (peixes)", sum(movements.filter(function (m) { return txt(m.movementType) === "mortalidade"; }), function (m) { return num(m.quantity); })],
+      ["Peixes despescados (despesca parcial)", sum(movements.filter(function (m) { return txt(m.movementType) === "despesca_parcial"; }), function (m) { return num(m.quantity); })],
+      ["Receitas recebidas (R$)", income],
+      ["Despesas pagas (R$)", expense],
+      ["Resultado de caixa (R$)", Math.round((income - expense) * 100) / 100],
+      ["Gerado em", now.toLocaleDateString("pt-BR") + " " + now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })],
+      ["Observação", "Valores como números (somáveis). Datas no formato dia/mês/ano. Cada aba traz um módulo do AquaGest."]
+    ];
+  }
+
+  function msg(text) {
+    if (window.AquaGestApp && typeof window.AquaGestApp.showMessage === "function") window.AquaGestApp.showMessage(text, "success");
+  }
+
+  async function buildAllSheets(property) {
+    var ctx = await buildContext();
+    var sheets = [{ name: "Resumo", rows: await summaryRows(property) }];
+    for (var i = 0; i < MODULES.length; i += 1) {
+      sheets.push({ name: MODULES[i].title, rows: await moduleRows(MODULES[i], ctx) });
+    }
+    return sheets;
+  }
+
+  async function exportAll() {
+    var X = window.RelatoriosExportService;
+    var property = await currentProperty();
+    var sheets = await buildAllSheets(property);
+    X.downloadWorkbook(X.fileStamp(property.name, "Excel geral", "xlsx"), sheets, "AquaGest");
+    msg("Excel geral gerado.");
+    return sheets;
+  }
+
+  async function exportModule(key, kind) {
+    var module = MODULES.find(function (m) { return m.key === key; });
+    if (!module) return null;
+    var X = window.RelatoriosExportService;
+    var property = await currentProperty();
+    var rows = await moduleRows(module, await buildContext());
+    if (kind === "csv") X.downloadMatrixCsv(X.fileStamp(property.name, module.title, "csv"), rows);
+    else X.downloadWorkbook(X.fileStamp(property.name, module.title, "xlsx"), [{ name: module.title, rows: rows }], module.title);
+    msg((kind === "csv" ? "CSV" : "Excel") + " de " + module.title + " gerado.");
+    return rows;
+  }
+
+  function exportBar(module) {
+    var bar = document.createElement("div");
+    bar.className = "aq-export-bar";
+    bar.setAttribute("data-export-bar", module.key);
+    bar.innerHTML = "<span>" + module.title + "</span>" +
+      '<button type="button" class="secondary-btn" data-export-module="' + module.key + '" data-export-kind="xlsx">Excel</button>' +
+      '<button type="button" class="secondary-btn" data-export-module="' + module.key + '" data-export-kind="csv">CSV</button>';
+    return bar;
+  }
+
+  function placeBars() {
+    MODULES.forEach(function (module) {
+      if (!module.screen || document.querySelector('[data-export-bar="' + module.key + '"]')) return;
+      var screen = document.getElementById("screen-" + module.screen);
+      if (!screen) return;
+      var host = null;
+      if (module.tab === "lotes") host = screen.querySelectorAll('[data-prod-tab="lotes"]')[1] || screen.querySelector('[data-prod-tab="lotes"]');
+      else if (module.tab === "mov") host = document.getElementById("mov_card");
+      else host = screen.querySelector(".page-card") || screen;
+      if (!host) return;
+      var bar = exportBar(module);
+      if (host === screen) screen.insertBefore(bar, screen.firstChild);
+      else host.insertBefore(bar, host.firstChild);
+    });
+    placeReportsCard();
+  }
+
+  function placeReportsCard() {
+    var screen = document.getElementById("screen-relatorios");
+    if (!screen || document.getElementById("aqExportCard")) return;
+    var card = document.createElement("section");
+    card.id = "aqExportCard";
+    card.className = "page-card";
+    card.innerHTML =
+      '<div class="toolbar"><div class="toolbar-title"><h3>Relatórios e exportação</h3><span>Planilhas de todos os módulos, backup e importação.</span></div></div>' +
+      '<div class="aq-export-cards">' +
+      '<article><h4>Planilha completa</h4><p>Um arquivo Excel com aba de resumo e uma aba para cada módulo: viveiros, lotes, movimentação, biometrias, água, arraçoamento, sanidade, estoque e financeiro.</p><button type="button" class="primary-btn" id="aqExportAll">Excel geral</button></article>' +
+      '<article><h4>Backup dos dados</h4><p>Cópia completa para guardar fora do aparelho ou levar para outro aparelho. Fica em Configurações.</p><button type="button" class="secondary-btn" data-go-backup="1">Abrir backup</button></article>' +
+      '<article><h4>Importar backup</h4><p>Restaura uma cópia salva antes. Os dados atuais são substituídos, por isso a importação fica em Configurações, com confirmação.</p><button type="button" class="secondary-btn" data-go-backup="1">Abrir importação</button></article>' +
+      "</div>";
+    screen.insertBefore(card, screen.firstChild);
+  }
+
+  function goToBackup() {
+    var nav = document.querySelector('[data-screen="configuracoes"]');
+    if (nav) nav.click();
+    setTimeout(function () {
+      var target = document.getElementById("backupExportBtn") || document.getElementById("aq-bk");
+      if (target && target.scrollIntoView) target.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 400);
+  }
+
+  document.addEventListener("click", function (event) {
+    var el = event.target && event.target.closest ? event.target : null;
+    if (!el) return;
+    var moduleBtn = el.closest("[data-export-module]");
+    if (moduleBtn) { exportModule(moduleBtn.getAttribute("data-export-module"), moduleBtn.getAttribute("data-export-kind")).catch(function (e) { console.error(e); }); return; }
+    if (el.closest("#aqExportAll")) { exportAll().catch(function (e) { console.error(e); }); return; }
+    if (el.closest("[data-go-backup]")) { goToBackup(); return; }
+    if (el.closest("[data-screen]") || el.closest("[data-prod-tab-btn]")) setTimeout(placeBars, 400);
+  });
+  window.addEventListener(window.FishMovementService ? window.FishMovementService.EVENT : "aquagest:fish-movement-changed", function () { setTimeout(placeBars, 200); });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(placeBars, 500); });
+  else setTimeout(placeBars, 500);
+
+  window.ExportacaoUI = { modules: MODULES, buildAllSheets: buildAllSheets, exportAll: exportAll, exportModule: exportModule, moduleRows: moduleRows, summaryRows: summaryRows, placeBars: placeBars };
+})();
+
+;
+
 /* ===== js/services/estoque-service.js ===== */
 /*
   AquaGest Lite
@@ -39802,9 +41196,9 @@
   function translateFeedPhase(value) {
     var phase = normalizeFeedPhase(value);
 
-    if (phase === "larvas_alevinos") return "Larvas e Alevinos / Iniciantes";
-    if (phase === "juvenil_recria") return "Juvenil / Recria";
-    if (phase === "terminacao") return "Terminação";
+    if (phase === "larvas_alevinos") return "Larvicultura e alevinagem (até 30 g)";
+    if (phase === "juvenil_recria") return "Recria (30 a 250 g)";
+    if (phase === "terminacao") return "Engorda (acima de 250 g)";
 
     return phase ? normalizeText(value) : "Não informado";
   }
@@ -41792,9 +43186,9 @@
 
     var phase = normalizeFeedPhase(value);
 
-    if (phase === "larvas_alevinos") return "Larvas e Alevinos / Iniciantes";
-    if (phase === "juvenil_recria") return "Juvenil / Recria";
-    if (phase === "terminacao") return "Terminação";
+    if (phase === "larvas_alevinos") return "Larvicultura e alevinagem (até 30 g)";
+    if (phase === "juvenil_recria") return "Recria (30 a 250 g)";
+    if (phase === "terminacao") return "Engorda (acima de 250 g)";
 
     return phase ? normalizeText(value) : "Não informado";
   }
@@ -41904,9 +43298,9 @@
   function getFeedPhaseOptionsHtml() {
     return (
       '<option value="">Selecione a fase</option>' +
-      '<option value="larvas_alevinos">Larvas e Alevinos / Iniciantes</option>' +
-      '<option value="juvenil_recria">Juvenil / Recria</option>' +
-      '<option value="terminacao">Terminação</option>'
+      '<option value="larvas_alevinos">Larvicultura e alevinagem (até 30 g)</option>' +
+      '<option value="juvenil_recria">Recria (30 a 250 g)</option>' +
+      '<option value="terminacao">Engorda (acima de 250 g)</option>'
     );
   }
 
@@ -48211,9 +49605,8 @@ function getIncomeCategoryOptionsHtml() {
   function weatherAdvice(minTemps) {
     var min = Math.min.apply(null, minTemps);
     if (!isFinite(min)) return null;
-    if (min < 15) return { level: "danger", text: "Frente fria: mínima de " + min.toFixed(0) + "°C nos próximos dias. Reduza ou suspenda a ração e monitore o oxigênio." };
-    if (min < 19) return { level: "warn", text: "Mínima de " + min.toFixed(0) + "°C prevista. Considere reduzir a ração (fator de temperatura)." };
-    return { level: "ok", text: "Sem queda de temperatura prevista (mínima " + min.toFixed(0) + "°C)." };
+    /* Previsão é do AR, não da água: o app não converte uma na outra. A ração segue a temperatura da água medida (SENAR 2019). */
+    return { level: "info", text: "Mínima do ar prevista nos próximos dias: " + min.toFixed(0) + " °C. Meça a água antes do trato: abaixo de 16 °C não fornecer ração; de 16 a 19 °C, 60%; de 20 a 24 °C, 80% (SENAR 2019)." };
   }
   async function loadWeather() {
     var pos = JSON.parse(localStorage.getItem("aq_geo") || "null");
@@ -48289,7 +49682,7 @@ function getIncomeCategoryOptionsHtml() {
     if (!el) { el = document.createElement("section"); el.id = id; el.className = "page-card"; parent.appendChild(el); }
     el.innerHTML = html; return el;
   }
-  function lines(list) { return list.length ? "<ul>" + list.map(function (a) { return "<li>" + (a.level === "danger" ? "🔴 " : a.level === "warn" ? "🟡 " : "🟢 ") + esc(a.text) + "</li>"; }).join("") + "</ul>" : "<p>Tudo em ordem.</p>"; }
+  function lines(list) { return list.length ? "<ul>" + list.map(function (a) { return "<li>" + (a.level === "danger" ? "🔴 " : a.level === "warn" ? "🟡 " : a.level === "info" ? "• " : "🟢 ") + esc(a.text) + "</li>"; }).join("") + "</ul>" : "<p>Tudo em ordem.</p>"; }
 
   async function render() {
     var d = await collect(), al = buildAlerts(d), dash = document.getElementById("screen-dashboard"), cfg = document.getElementById("screen-configuracoes"), fin = document.getElementById("screen-financeiro");

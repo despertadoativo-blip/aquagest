@@ -1264,7 +1264,7 @@
           id="screen-producao"
           class="screen"
         >
-          <section class="page-card">
+          <section class="page-card" data-prod-tab="lotes">
             <div class="toolbar">
               <div class="toolbar-title">
                 <h3>
@@ -1531,7 +1531,7 @@
             </form>
           </section>
 
-          <section class="page-card">
+          <section class="page-card" data-prod-tab="lotes">
             <div class="toolbar">
               <div class="toolbar-title">
                 <h3>
@@ -2088,10 +2088,11 @@
 
             <div class="dimensionamento-assumption">
               <strong>Regra de referência</strong>
-              <span>600 kg de peixe por 1.000 m² sem aeração adicional e 1.000 a 1.500 kg adicionais por CV de aeração.</span>
+              <span id="dimension_assumptionText">150 kg de peixe por 1.000 m² (1.500 kg/ha) sem aeração adicional e 493 kg adicionais por CV de aeração.</span>
+              <small id="dimension_sourceText" class="technical-note"></small>
             </div>
 
-            <form id="dimensionamentoForm" class="form">
+            <form id="dimensionamentoForm" class="form" novalidate>
               <div class="form-grid">
                 <div>
                   <label for="dimension_species">Espécie de peixe</label>
@@ -2106,10 +2107,44 @@
                   <input id="dimension_pondAreaM2" type="number" min="0.01" step="0.01" placeholder="Ex.: 1.000" required />
                 </div>
                 <div>
-                  <label for="dimension_equipmentPowerCv">Potência de cada aerador (CV)</label>
+                  <label for="dimension_pondId">Usar área de um viveiro cadastrado (opcional)</label>
+                  <select id="dimension_pondId"><option value="">Digitar a área manualmente</option></select>
+                </div>
+                <div>
+                  <label for="dimension_equipmentPowerCv">Potência de cada aerador</label>
                   <input id="dimension_equipmentPowerCv" type="number" min="0.01" step="0.1" value="1.5" required />
                 </div>
+                <div>
+                  <label for="dimension_powerUnit">Unidade da potência</label>
+                  <select id="dimension_powerUnit"><option value="cv">CV (cavalo-vapor)</option><option value="hp">HP (convertido: 1 HP = 1,014 CV)</option></select>
+                </div>
+                <div>
+                  <label for="dimension_measuredDo">OD medido agora (mg/L) — opcional</label>
+                  <input id="dimension_measuredDo" type="number" min="0" step="0.1" inputmode="decimal" placeholder="Ex.: 3,8" />
+                </div>
               </div>
+              <details class="dimensionamento-params">
+                <summary>Parâmetros da regra (editáveis) e fonte</summary>
+                <div class="form-grid">
+                  <div>
+                    <label for="dimension_naturalKgPerM2">Capacidade natural sem aeração (kg/m²)</label>
+                    <input id="dimension_naturalKgPerM2" type="number" min="0.01" step="0.01" inputmode="decimal" value="0.15" />
+                  </div>
+                  <div>
+                    <label for="dimension_kgPerCvLow">Kg adicionais por CV — mínimo</label>
+                    <input id="dimension_kgPerCvLow" type="number" min="1" step="1" value="493" />
+                  </div>
+                  <div>
+                    <label for="dimension_kgPerCvHigh">Kg adicionais por CV — máximo</label>
+                    <input id="dimension_kgPerCvHigh" type="number" min="1" step="1" value="493" />
+                  </div>
+                  <div>
+                    <label for="dimension_source">Fonte / referência técnica</label>
+                    <input id="dimension_source" type="text" placeholder="Ex.: autor, publicação, ano ou responsável técnico" />
+                  </div>
+                </div>
+                <button id="dimension_resetParams" class="secondary-btn" type="button">Restaurar valores padrão</button>
+              </details>
               <div class="form-actions">
                 <button class="primary-btn" type="submit">Calcular dimensionamento</button>
               </div>
@@ -2124,6 +2159,7 @@
               <div class="status-card"><strong>Faixa de potência</strong><span id="dimension_powerRange">Aguardando cálculo</span></div>
               <div class="status-card"><strong>Aeradores estimados</strong><span id="dimension_aeratorCount">Aguardando cálculo</span></div>
               <div class="status-card"><strong>Potência instalada</strong><span id="dimension_installedPower">Aguardando cálculo</span></div>
+              <div class="status-card"><strong>Capacidade cadastrada do viveiro</strong><span id="dimension_pondCapacity">Selecione um viveiro</span></div>
             </div>
             <div id="dimension_status" class="dimensionamento-alert" role="status" aria-live="polite">Informe os dados para avaliar a necessidade de aeração.</div>
             <p id="dimension_recommendation" class="technical-note">A recomendação será apresentada após o cálculo.</p>
@@ -2141,7 +2177,7 @@
           <section class="page-card">
             <div class="toolbar-title">
               <h3>Regra de manejo horário</h3>
-              <span>Use como orientação inicial; confirme a necessidade com medições de oxigênio dissolvido.</span>
+              <span>Lembrete de monitoramento. Quem decide é o oxigênio dissolvido medido: abaixo de 4 mg/L, ligar; abaixo de 2 mg/L, ligar tudo e suspender a ração.</span>
             </div>
             <div class="table-wrapper dimensionamento-table-wrapper">
               <table class="dimensionamento-table">
@@ -2150,7 +2186,7 @@
                 </thead>
                 <tbody>
                   <tr><td>15:00–17:00</td><td>Quebrar a estratificação</td><td>Misturar a camada superficial e a água do fundo, reduzindo diferenças de temperatura e oxigênio.</td></tr>
-                  <tr><td>18:00–22:00</td><td>Desligado — regra geral</td><td>Em condições normais, ainda há oxigênio acumulado durante o período de luz.</td></tr>
+                  <tr><td>18:00–22:00</td><td>Medir o OD</td><td>Costuma haver oxigênio acumulado do dia, mas a decisão é pelo OD: abaixo de 4 mg/L, ligar a aeração em qualquer horário.</td></tr>
                   <tr><td>23:00–06:00</td><td>Oxigenação de emergência</td><td>Período crítico sem fotossíntese: peixes, algas e matéria orgânica continuam consumindo oxigênio.</td></tr>
                 </tbody>
               </table>
@@ -2344,6 +2380,8 @@
   
   
   
+  
+  
 
   <!-- =====================================================
        BIOMETRIA
@@ -2371,6 +2409,7 @@
        ARRAÇOAMENTO
   ====================================================== -->
 
+  
   
   
   
