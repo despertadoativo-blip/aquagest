@@ -1,6 +1,6 @@
 /* ===== css/style.css ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: css/style.css
   Etapa: layout base / módulos integrados
   Versão: style-layout-v4-estavel
@@ -1931,7 +1931,7 @@ body.sidebar-open::before {
 }
 /* ===== css/mobile-layout.css ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: css/mobile-layout.css
   Etapa: infraestrutura responsiva global
   Versão: mobile-layout-v3-estrutura-forte
@@ -3566,7 +3566,7 @@ textarea {
 }
 /* ===== css/dashboard.css ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: css/dashboard.css
   Etapa: 3 — Dashboard / Layout leve
   Versão reconstruída: dashboard-light-v1
@@ -3878,7 +3878,7 @@ textarea {
   }
 }
 /* ===== css/aquagest-polish.css ===== */
-/* Camada visual consolidada — AquaGest Lite v8 */
+/* Camada visual consolidada — AquaGest Pro v8 */
 :root { --color-primary: #0b8f83; --color-primary-dark: #07665f; --color-bg: #eef7f5; --color-border: #d4e7e3; --radius-lg: 20px; --shadow-soft: 0 14px 34px rgba(9, 70, 66, .09); }
 body { background: radial-gradient(circle at 8% 0%, rgba(24, 170, 151, .16), transparent 30%), linear-gradient(145deg, var(--color-bg), #f8fbfb 55%, #edf5fa); }
 .page-card, .dashboard-card, .status-card, .auth-card { border: 1px solid rgba(143, 190, 184, .36); box-shadow: var(--shadow-soft); transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
@@ -4215,7 +4215,7 @@ html.desktop-mode .screen { max-width: 1480px; margin-left: auto; margin-right: 
   }
 }
 
-/* Paleta acadêmica e técnica — AquaGest Lite */
+/* Paleta acadêmica e técnica — AquaGest Pro */
 :root {
   --color-primary: #0b4f6c;
   --color-primary-dark: #083b50;
@@ -4377,3 +4377,26 @@ table thead th {
 #feedingNutritionGuide th, #feedingNutritionGuide td { word-break: normal; overflow-wrap: normal; hyphens: none; vertical-align: top; }
 #feedingNutritionGuide td:nth-child(1), #feedingNutritionGuide td:nth-child(2), #feedingNutritionGuide td:nth-child(4), #feedingNutritionGuide td:nth-child(7), #feedingNutritionGuide th { white-space: nowrap; }
 #mov_list .data-table td, #mov_list .data-table th { white-space: nowrap; }
+
+/* =========================================================
+   v25 — botões secundários na área de conteúdo, ícones do menu
+   O estilo base de .secondary-btn foi feito para a barra lateral escura
+   (fundo quase transparente) e sumia sobre os cartões brancos.
+========================================================= */
+.main-content .secondary-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 42px; padding: 9px 16px; border-radius: 12px;
+  background: #ffffff; color: #0b4f4a; border: 1px solid #b9d9d3;
+  font-weight: 750; cursor: pointer; box-shadow: 0 1px 2px rgba(15, 118, 110, .06);
+}
+.main-content .secondary-btn:hover { background: #eef8f6; border-color: #0f766e; }
+.main-content .secondary-btn:disabled { opacity: .5; cursor: not-allowed; }
+.main-content .secondary-btn.aq-btn-strong { background: #0f766e; color: #ffffff; border-color: #0f766e; }
+.main-content .secondary-btn.aq-btn-strong:hover { background: #115e59; }
+[data-theme="dark"] .main-content .secondary-btn { background: rgba(255,255,255,.06); color: #e2e8f0; border-color: rgba(255,255,255,.2); }
+[data-theme="dark"] .main-content .secondary-btn.aq-btn-strong { background: #0f766e; color: #ffffff; }
+#screen-configuracoes .page-card p > .secondary-btn + .secondary-btn,
+#screen-configuracoes .page-card .secondary-btn { margin: 4px 8px 4px 0; }
+#screen-configuracoes input[type="password"], #screen-configuracoes input[type="file"] { max-width: 260px; margin: 4px 8px 4px 0; }
+.nav-item[data-screen="desempenho"]::before { content: "⤴"; }
+.nav-item[data-screen="sanidade"]::before { content: "✚"; }

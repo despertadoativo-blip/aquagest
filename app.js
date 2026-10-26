@@ -31,7 +31,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/core/id-generator.js
   Etapa: infraestrutura central de identificadores
   Versão: id-generator-v4-estrutura-forte
@@ -572,7 +572,7 @@
 
     /*
       Compatibilidade com identificadores
-      anteriores do AquaGest Lite.
+      anteriores do AquaGest Pro.
 
       Não exige UUID perfeito para não invalidar
       registros já existentes.
@@ -905,7 +905,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/core/models.js
   Etapa: infraestrutura central de domínio
   Versão: models-v4-contratos-fortes
@@ -3144,7 +3144,7 @@
 ;
 
 /* ===== js/core/migrations.js ===== */
-/* AquaGest Lite — migrações estruturais do IndexedDB. */
+/* AquaGest Pro — migrações estruturais do IndexedDB. */
 (function () {
   "use strict";
 
@@ -3190,7 +3190,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/core/database.js
   Banco: AquaGestProDB
   Versão do banco: 6
@@ -3208,7 +3208,7 @@
   - transações com confirmação real
   - API update compatível com os services atuais
   - validação estrutural de stores e índices
-  - preparado para evolução segura do AquaGest Lite
+  - preparado para evolução segura do AquaGest Pro
 */
 
 (function () {
@@ -3652,7 +3652,7 @@
       }
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Índice não pôde ser configurado:",
+        "[AquaGest Pro] Índice não pôde ser configurado:",
         store.name + "." + indexName,
         error
       );
@@ -3718,7 +3718,7 @@
         );
       } catch (error) {
         console.warn(
-          "[AquaGest Lite] Não foi possível validar a store:",
+          "[AquaGest Pro] Não foi possível validar a store:",
           definition.name,
           error
         );
@@ -3817,7 +3817,7 @@
           }
         } catch (error) {
           console.error(
-            "[AquaGest Lite] Falha na atualização estrutural do banco:",
+            "[AquaGest Pro] Falha na atualização estrutural do banco:",
             error
           );
 
@@ -3842,7 +3842,7 @@
 
         dbInstance.onversionchange = function () {
           /*
-            Outra versão do AquaGest Lite iniciou
+            Outra versão do AquaGest Pro iniciou
             uma atualização do schema.
 
             Esta conexão é fechada para permitir
@@ -3873,7 +3873,7 @@
 
         reject(
           new Error(
-            "O banco AquaGestProDB está temporariamente bloqueado por outra instância aberta do aplicativo. Feche apenas outras abas ou janelas do AquaGest Lite e tente novamente."
+            "O banco AquaGestProDB está temporariamente bloqueado por outra instância aberta do aplicativo. Feche apenas outras abas ou janelas do AquaGest Pro e tente novamente."
           )
         );
       };
@@ -4291,7 +4291,7 @@
   /*
     Mantido para compatibilidade técnica.
 
-    Nenhuma rotina automática do AquaGest Lite
+    Nenhuma rotina automática do AquaGest Pro
     chama clear(). O banco não é limpo durante
     inicialização, atualização ou validação.
   */
@@ -4552,7 +4552,7 @@
 ;
 
 /* ===== js/core/data-isolation.js ===== */
-/* AquaGest Lite — isolamento lógico por produtor e piscicultura. */
+/* AquaGest Pro — isolamento lógico por produtor e piscicultura. */
 (function () {
   "use strict";
 
@@ -4616,7 +4616,7 @@
 ;
 
 /* ===== js/core/ml-data-service.js ===== */
-/* AquaGest Lite — exportação opcional e anonimizada para melhoria dos modelos. */
+/* AquaGest Pro — exportação opcional e anonimizada para melhoria dos modelos. */
 (function () {
   "use strict";
 
@@ -4687,7 +4687,7 @@
 
 /* ===== js/core/backup-service.js ===== */
 /*
-  AquaGest Lite — backup e restauração do banco local.
+  AquaGest Pro — backup e restauração do banco local.
   O arquivo é JSON portátil e inclui todas as stores conhecidas do schema.
 */
 (function () {
@@ -4759,7 +4759,7 @@
     }
 
     if (backup.format !== FORMAT || Number(backup.formatVersion) !== FORMAT_VERSION) {
-      throw new Error("Formato de backup incompatível com esta versão do AquaGest Lite.");
+      throw new Error("Formato de backup incompatível com esta versão do AquaGest Pro.");
     }
 
     var backupVersion = Number(backup.databaseVersion);
@@ -5137,7 +5137,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/core/app-state.js
   Etapa: infraestrutura central de estado
   Versão: app-state-v5-desempenho-integrado
@@ -5159,6 +5159,9 @@
 
   var THEME_KEY =
     "aquagestpro_theme";
+
+  var THEME_CHOICE_KEY =
+    "aquagestpro_theme_choice";
 
   var SCREEN_KEY =
     "aquagestpro_current_screen";
@@ -5355,7 +5358,7 @@
         );
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Não foi possível ler o armazenamento local:",
+        "[AquaGest Pro] Não foi possível ler o armazenamento local:",
         error
       );
 
@@ -5383,7 +5386,7 @@
       return true;
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Não foi possível gravar no armazenamento local:",
+        "[AquaGest Pro] Não foi possível gravar no armazenamento local:",
         error
       );
 
@@ -5407,7 +5410,7 @@
       return true;
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Não foi possível remover dado do armazenamento local:",
+        "[AquaGest Pro] Não foi possível remover dado do armazenamento local:",
         error
       );
 
@@ -5603,7 +5606,7 @@
       );
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Não foi possível serializar a sessão:",
+        "[AquaGest Pro] Não foi possível serializar a sessão:",
         error
       );
 
@@ -5735,7 +5738,7 @@
       };
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Sessão local inválida.",
+        "[AquaGest Pro] Sessão local inválida.",
         error
       );
 
@@ -5983,40 +5986,20 @@
       : "light";
   }
 
+  /*
+    v25: o app abre sempre no tema claro. O tema escuro só é usado quando o
+    produtor escolhe "Alternar tema"; a escolha fica salva em THEME_CHOICE_KEY.
+    O modo escuro do aparelho e o valor antigo salvo automaticamente em
+    THEME_KEY não são mais seguidos (deixavam a tela de entrada ilegível).
+  */
   function loadTheme() {
-    var saved =
+    var choice =
       storageGet(
-        THEME_KEY
+        THEME_CHOICE_KEY
       );
 
-    if (
-      saved === "dark" ||
-      saved === "light"
-    ) {
-      state.theme =
-        saved;
-
-      return saved;
-    }
-
-    var prefersDark =
-      false;
-
-    try {
-      prefersDark =
-        !!(
-          window.matchMedia &&
-          window.matchMedia(
-            "(prefers-color-scheme: dark)"
-          ).matches
-        );
-    } catch (error) {
-      prefersDark =
-        false;
-    }
-
     state.theme =
-      prefersDark
+      choice === "dark"
         ? "dark"
         : "light";
 
@@ -6057,6 +6040,11 @@
       "dark"
         ? "light"
         : "dark";
+
+    storageSet(
+      THEME_CHOICE_KEY,
+      nextTheme
+    );
 
     return applyTheme(
       nextTheme
@@ -6227,7 +6215,7 @@
 ;
 
 /* ===== js/auth/crypto.js ===== */
-/* AquaGest Lite — PBKDF2-SHA-256 para credenciais. */
+/* AquaGest Pro — PBKDF2-SHA-256 para credenciais. */
 (function () {
   "use strict";
 
@@ -6337,7 +6325,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/auth/permissions.js
   Etapa: segurança e autorização
   Versão: permissions-v4-desempenho-integrado
@@ -6715,7 +6703,7 @@
     }
 
     /*
-      Regra atual do AquaGest Lite:
+      Regra atual do AquaGest Pro:
       proprietário possui acesso administrativo.
     */
     if (
@@ -7225,7 +7213,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/auth/auth.js
   Etapa: autenticação
   Versão: auth-service-v3.1-recuperacao-preventiva
@@ -8086,7 +8074,7 @@
 
 /* ===== js/services/piscicultura-service.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/piscicultura-service.js
   Etapa: 3/4 — Piscicultura
   Versão reconstruída: piscicultura-service-core-v5
@@ -9081,7 +9069,7 @@
 
 /* ===== js/ui/piscicultura-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/piscicultura-ui.js
   Etapa: 3/4 — Piscicultura
   Versão reconstruída: piscicultura-ui-core-v8
@@ -10031,7 +10019,7 @@
 
 /* ===== js/ui/localidade-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/localidade-ui.js
   Função: preenchimento assistido de Município e UF da Piscicultura
   Modo: seguro, sem alterar IndexedDB
@@ -10299,7 +10287,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/viveiros-service.js
   Etapa: 4/5 — Viveiros integrado à Produção
   Versão: viveiros-service-v4-estrutura-forte
@@ -12545,7 +12533,7 @@
 
 /* ===== js/ui/viveiros-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/viveiros-ui.js
   Etapa: 4/5 — Viveiros + Produção
   Versão reconstruída: viveiros-ui-v6
@@ -13475,7 +13463,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/producao-service.js
   Etapa: 5.4 — Produção / Alojamento
   Versão: producao-service-v7-alojamento-estavel
@@ -15314,7 +15302,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/producao-ui.js
   Etapa: 5.4 — Produção / Alojamento
   Versão: producao-ui-v8-data-preservada
@@ -18703,7 +18691,7 @@
 
 /* ===== js/services/biometria-service.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/biometria-service.js
   Etapa: 6 — Biometria
   Versão: biometria-service-v3-projecao-racao
@@ -21145,7 +21133,7 @@
 
 /* ===== js/ui/biometria-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/biometria-ui.js
   Etapa: 6 — Biometria
   Versão: biometria-ui-v4-projecao-racao
@@ -22882,7 +22870,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/biometria-alimentacao-ui.js
   Função: percentual alimentar ajustável na Biometria
   Versão: biometria-alimentacao-ui-v2-percentual-operacional
@@ -23316,7 +23304,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/desempenho-graficos-ui.js
   Etapa: Desempenho + Dashboard
   Versão: desempenho-graficos-ui-v3-dashboard-integrado
@@ -27424,7 +27412,7 @@
         init().catch(
           function (error) {
             console.error(
-              "[AquaGest Lite] Erro no módulo Desempenho:",
+              "[AquaGest Pro] Erro no módulo Desempenho:",
               error
             );
           }
@@ -27438,7 +27426,7 @@
     init().catch(
       function (error) {
         console.error(
-          "[AquaGest Lite] Erro no módulo Desempenho:",
+          "[AquaGest Pro] Erro no módulo Desempenho:",
           error
         );
       }
@@ -27504,7 +27492,7 @@
 ;
 
 /* ===== js/services/predicao-service.js ===== */
-/* AquaGest Lite — TGC e camada local de previsão. */
+/* AquaGest Pro — TGC e camada local de previsão. */
 (function () {
   "use strict";
 
@@ -27802,7 +27790,7 @@
 ;
 
 /* ===== js/ui/predicao-ui.js ===== */
-/* AquaGest Lite — interface do TGC e das previsões. */
+/* AquaGest Pro — interface do TGC e das previsões. */
 (function () {
   "use strict";
   var initialized = false;
@@ -28115,7 +28103,7 @@
     else if (window.alert) window.alert(text);
   }
 
-  function defaults() { return (window.DimensionamentoService && window.DimensionamentoService.defaults) || { naturalKgPerM2: 0.6, kgPerCvLow: 1000, kgPerCvHigh: 1500, source: "" }; }
+  function defaults() { return (window.DimensionamentoService && window.DimensionamentoService.defaults) || { naturalKgPerM2: 0.15, kgPerCvLow: 493, kgPerCvHigh: 493, source: "" }; }
 
   function loadParams() {
     var saved = null;
@@ -28148,7 +28136,7 @@
     var natural = result ? result.parameters.naturalKgPerM2 : AquaNumber(value("dimension_naturalKgPerM2"), d.naturalKgPerM2);
     var low = result ? result.parameters.kgPerCvLow : AquaNumber(value("dimension_kgPerCvLow"), d.kgPerCvLow);
     var high = result ? result.parameters.kgPerCvHigh : AquaNumber(value("dimension_kgPerCvHigh"), d.kgPerCvHigh);
-    set("dimension_assumptionText", format(natural * 1000, 0) + " kg de peixe por 1.000 m² (" + format(natural, 2) + " kg/m²) sem aeração adicional e " + format(low, 0) + " a " + format(high, 0) + " kg adicionais por CV de aeração.");
+    set("dimension_assumptionText", format(natural * 1000, 0) + " kg de peixe por 1.000 m² (" + format(natural, 2) + " kg/m²) sem aeração adicional e " + (low === high ? format(low, 0) : format(low, 0) + " a " + format(high, 0)) + " kg adicionais por CV de aeração.");
     var source = String(value("dimension_source") || "").trim();
     set("dimension_sourceText", "Fonte: " + (source || d.source));
   }
@@ -28248,7 +28236,7 @@
       }
 
       set("dimension_recommendation", r.requiresAeration
-        ? "Faixa teórica: " + format(r.powerRangeMinCv, 1) + " a " + format(r.powerRangeMaxCv, 1) + " CV. Para uma margem conservadora, considere " + r.aeratorsRecommended + " aerador(es) de " + powerText + ", totalizando " + format(r.installedPowerCv, 1) + " CV instalados."
+        ? (r.powerRangeMinCv === r.powerRangeMaxCv ? "Potência necessária: " + format(r.powerRangeMaxCv, 1) + " CV." : "Faixa teórica: " + format(r.powerRangeMinCv, 1) + " a " + format(r.powerRangeMaxCv, 1) + " CV.") + " Para uma margem conservadora, considere " + r.aeratorsRecommended + " aerador(es) de " + powerText + ", totalizando " + format(r.installedPowerCv, 1) + " CV instalados."
         : "Não há potência adicional calculada pela regra natural. A decisão final deve considerar oxigênio dissolvido, profundidade, renovação de água, alimentação e condições climáticas.");
       set("dimension_context", "Espécie informada: " + r.species + ". Área: " + format(r.pondAreaM2, 1) + " m². Produção desejada: " + format(r.targetProductionKg, 1) + " kg." + (r.parameters.custom ? " Parâmetros personalizados em uso." : ""));
       renderAssumption(r);
@@ -28302,7 +28290,7 @@
 ;
 
 /* ===== js/services/sanidade-service.js ===== */
-/* AquaGest Lite — registros estruturados de sanidade aquícola. */
+/* AquaGest Pro — registros estruturados de sanidade aquícola. */
 (function () {
   "use strict";
 
@@ -28404,7 +28392,7 @@
 ;
 
 /* ===== js/ui/sanidade-ui.js ===== */
-/* AquaGest Lite — interface do módulo de sanidade. */
+/* AquaGest Pro — interface do módulo de sanidade. */
 (function () {
   "use strict";
   var initialized = false;
@@ -28426,7 +28414,7 @@
     if (!select) return;
     var current = select.value;
     var cycles = [];
-    try { if (window.ProducaoService && typeof window.ProducaoService.listActiveProductionCycles === "function") cycles = await window.ProducaoService.listActiveProductionCycles(); } catch (error) { console.warn("[AquaGest Lite] Lotes de sanidade não carregados:", error); }
+    try { if (window.ProducaoService && typeof window.ProducaoService.listActiveProductionCycles === "function") cycles = await window.ProducaoService.listActiveProductionCycles(); } catch (error) { console.warn("[AquaGest Pro] Lotes de sanidade não carregados:", error); }
     select.innerHTML = '<option value="">Sem vínculo com lote</option>';
     (cycles || []).forEach(function (cycle) {
       var id = cycle.id || cycle.cycleId;
@@ -28474,7 +28462,7 @@
 
 /* ===== js/services/agua-service.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/agua-service.js
   Etapa: 7 — Água / Qualidade da água
   Versão: agua-service-v1-engenharia
@@ -30140,7 +30128,7 @@
 
 /* ===== js/ui/agua-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/agua-ui.js
   Etapa: 7 — Água / Qualidade da água
   Versão: agua-ui-v1-engenharia
@@ -31332,7 +31320,7 @@
 
 /* ===== js/services/arracoamento-service.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/arracoamento-service.js
   Etapa: 8 / Pacote 9.2 — Arraçoamento técnico + nutrição da tilápia + estoque global
   Versão: arracoamento-service-v4-nutricao-tilapia-estoque-global
@@ -34147,7 +34135,7 @@
 
 /* ===== js/ui/arracoamento-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/arracoamento-ui.js
   Etapa: 8 / Pacote 9.2 — Arraçoamento técnico + nutrição da tilápia + estoque global
   Versão: arracoamento-ui-v4-nutricao-tilapia-estoque-global
@@ -36389,7 +36377,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/relatorios-service-v2.js
   Etapa: Relatórios técnicos
   Versão: relatorios-service-v2-consolidado
@@ -37330,7 +37318,8 @@
 
   function averageField(
     records,
-    keys
+    keys,
+    decimals
   ) {
     var values =
       records
@@ -37376,10 +37365,13 @@
         0
       );
 
+    /* v25: casas decimais conforme o parâmetro (TAN 3, NH3 4); antes tudo era arredondado para 2. */
     return round(
       total /
       values.length,
-      2
+      decimals === undefined
+        ? 2
+        : decimals
     );
   }
 
@@ -37472,13 +37464,26 @@
             ]
           ),
 
+        /* v25: a leitura de água grava a amônia total como tanMgL (TAN); o NH3 é calculado (nh3MgL). */
         ammoniaMgL:
           averageField(
             records,
             [
+              "tanMgL",
+              "ammoniaTotalMgL",
               "ammoniaMgL",
               "ammonia"
-            ]
+            ],
+            3
+          ),
+
+        nh3MgL:
+          averageField(
+            records,
+            [
+              "nh3MgL"
+            ],
+            4
           ),
 
         nitriteMgL:
@@ -37487,7 +37492,8 @@
             [
               "nitriteMgL",
               "nitrite"
-            ]
+            ],
+            3
           )
       }
     };
@@ -38445,7 +38451,7 @@
   }
 
   function documentHtml(title, html) {
-    return "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><title>" + (title || "Relatório AquaGest Lite") + "</title><style>body{font:14px Arial,sans-serif;color:#18343a;margin:28px}h1,h2,h3,h4{color:#075e59}table{width:100%;border-collapse:collapse;margin:14px 0}th,td{border:1px solid #cbdedb;padding:8px;text-align:left}th{background:#e4f3f0}.reports-summary-grid,.reports-info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.reports-summary-card,.reports-info-item,.reports-status-box{border:1px solid #cbdedb;padding:10px;border-radius:8px}.reports-summary-card strong,.reports-info-item strong{display:block;font-size:11px;text-transform:uppercase;color:#587477}.reports-summary-card span,.reports-info-item span{display:block;margin-top:5px;font-size:16px;font-weight:700}@media print{body{margin:12mm}.reports-summary-grid,.reports-info-grid{grid-template-columns:repeat(4,1fr)}} </style></head><body><h1>AquaGest Lite</h1>" + (html || "") + "</body></html>";
+    return "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><title>" + (title || "Relatório AquaGest Pro") + "</title><style>body{font:14px Arial,sans-serif;color:#18343a;margin:28px}h1,h2,h3,h4{color:#075e59}table{width:100%;border-collapse:collapse;margin:14px 0}th,td{border:1px solid #cbdedb;padding:8px;text-align:left}th{background:#e4f3f0}.reports-summary-grid,.reports-info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.reports-summary-card,.reports-info-item,.reports-status-box{border:1px solid #cbdedb;padding:10px;border-radius:8px}.reports-summary-card strong,.reports-info-item strong{display:block;font-size:11px;text-transform:uppercase;color:#587477}.reports-summary-card span,.reports-info-item span{display:block;margin-top:5px;font-size:16px;font-weight:700}@media print{body{margin:12mm}.reports-summary-grid,.reports-info-grid{grid-template-columns:repeat(4,1fr)}} </style></head><body><h1>AquaGest Pro</h1>" + (html || "") + "</body></html>";
   }
 
   function downloadCsv(filename, rows) {
@@ -38466,7 +38472,7 @@
   }
 
   function toSpreadsheetRows(title, html) {
-    var rows = [["AquaGest Lite", title || "Relatório técnico do ciclo"]];
+    var rows = [["AquaGest Pro", title || "Relatório técnico do ciclo"]];
     if (typeof DOMParser === "undefined") {
       var fallback = cleanText(String(html || "").replace(/<[^>]*>/g, " "));
       if (fallback) rows.push([fallback]);
@@ -38522,22 +38528,74 @@
     return name;
   }
 
+  /* v25: data "dd/mm/aaaa" vira data de verdade no Excel (número de série com formato de data). */
+  function excelDateSerial(value) {
+    var text = String(value === null || value === undefined ? "" : value).trim();
+    var match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+    var iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (!match && !iso) return null;
+    var day = Number(match ? match[1] : iso[3]), month = Number(match ? match[2] : iso[2]), year = Number(match ? match[3] : iso[1]);
+    var utc = Date.UTC(year, month - 1, day);
+    var check = new Date(utc);
+    if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return null;
+    return Math.round((utc - Date.UTC(1899, 11, 30)) / 86400000);
+  }
+
+  function displayLength(value) {
+    var numeric = numericCellValue(value);
+    if (numeric !== null) return String(numeric).replace(".", ",").length + 1;
+    return cleanText(value).length;
+  }
+
+  /*
+    v25: primeira linha = cabeçalho (negrito, fundo verde, congelada ao rolar),
+    largura de cada coluna pelo maior conteúdo, datas como datas.
+    Estilos (styles.xml): s="1" cabeçalho, s="2" data dd/mm/aaaa.
+  */
   function worksheetXml(rows) {
     var list = Array.isArray(rows) && rows.length ? rows : [[""]];
     var maxColumns = list.reduce(function (maximum, row) {
       return Math.max(maximum, Array.isArray(row) ? row.length : 1);
     }, 1);
+    var widths = [];
+    for (var column = 0; column < maxColumns; column += 1) {
+      var longest = 6;
+      list.forEach(function (row, rowIndex) {
+        var values = Array.isArray(row) ? row : [row];
+        if (values[column] === undefined) return;
+        var length = displayLength(values[column]);
+        /* Textos longos (observações) não alargam a coluna além de 60 caracteres. */
+        longest = Math.max(longest, Math.min(length, rowIndex === 0 ? 40 : 60));
+      });
+      widths.push(Math.min(62, longest + 2));
+    }
     var dimension = "A1:" + columnName(maxColumns - 1) + list.length;
-    var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><outlinePr summaryBelow="1" summaryRight="1"/><pageSetUpPr/></sheetPr><dimension ref="' + dimension + '"/><sheetViews><sheetView workbookViewId="0"><selection activeCell="A1" sqref="A1"/></sheetView></sheetViews><sheetFormatPr baseColWidth="8" defaultRowHeight="15"/><sheetData>';
+    var frozen = list.length > 1;
+    var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><outlinePr summaryBelow="1" summaryRight="1"/><pageSetUpPr/></sheetPr><dimension ref="' + dimension + '"/><sheetViews><sheetView workbookViewId="0">' +
+      (frozen ? '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/>' : '<selection activeCell="A1" sqref="A1"/>') +
+      '</sheetView></sheetViews><sheetFormatPr baseColWidth="8" defaultRowHeight="15"/><cols>' +
+      widths.map(function (width, index) { return '<col min="' + (index + 1) + '" max="' + (index + 1) + '" width="' + width + '" customWidth="1"/>'; }).join("") +
+      '</cols><sheetData>';
     list.forEach(function (row, rowIndex) {
       var values = Array.isArray(row) ? row : [row];
+      var header = rowIndex === 0;
       xml += '<row r="' + (rowIndex + 1) + '">';
       values.forEach(function (value, columnIndex) {
+        var ref = columnName(columnIndex) + (rowIndex + 1);
+        if (header) {
+          xml += '<c r="' + ref + '" s="1" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
+          return;
+        }
+        var serial = excelDateSerial(value);
+        if (serial !== null) {
+          xml += '<c r="' + ref + '" s="2"><v>' + serial + "</v></c>";
+          return;
+        }
         var numeric = numericCellValue(value);
         if (numeric !== null) {
-          xml += '<c r="' + columnName(columnIndex) + (rowIndex + 1) + '" t="n"><v>' + numeric + "</v></c>";
+          xml += '<c r="' + ref + '" t="n"><v>' + numeric + "</v></c>";
         } else {
-          xml += '<c r="' + columnName(columnIndex) + (rowIndex + 1) + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
+          xml += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
         }
       });
       xml += "</row>";
@@ -38633,10 +38691,10 @@
       "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>',
       "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView visibility="visible" minimized="0" showHorizontalScroll="1" showVerticalScroll="1" showSheetTabs="1" activeTab="0"/></bookViews><sheets>' + list.map(function (sh) { return '<sheet name="' + xmlEscape(sh.name) + '" sheetId="' + sh.index + '" state="visible" r:id="rId' + sh.index + '"/>'; }).join("") + '</sheets><definedNames/><calcPr calcId="124519" fullCalcOnLoad="1"/></workbook>',
       "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + list.map(function (sh) { return '<Relationship Id="rId' + sh.index + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet' + sh.index + '.xml"/>'; }).join("") + '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdTheme" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>',
-      "xl/theme/theme1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AquaGest Lite"><a:themeElements><a:clrScheme name="AquaGest"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="0B4F6C"/></a:accent1><a:accent2><a:srgbClr val="075E59"/></a:accent2><a:accent3><a:srgbClr val="2A9D8F"/></a:accent3><a:accent4><a:srgbClr val="7AA6C2"/></a:accent4><a:accent5><a:srgbClr val="8AB17D"/></a:accent5><a:accent6><a:srgbClr val="E9C46A"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="AquaGest"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="AquaGest"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>',
-      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="0"/><fonts count="1"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font></fonts><fills count="2"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" pivotButton="0" quotePrefix="0" xfId="0"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0" hidden="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
-      "docProps/core.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEscape(title || "Relatório AquaGest Lite") + '</dc:title><dc:creator>AquaGest Lite</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00Z</dcterms:created></cp:coreProperties>',
-      "docProps/app.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>AquaGest Lite</Application><AppVersion>1.0</AppVersion></Properties>'
+      "xl/theme/theme1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AquaGest Pro"><a:themeElements><a:clrScheme name="AquaGest"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="0B4F6C"/></a:accent1><a:accent2><a:srgbClr val="075E59"/></a:accent2><a:accent3><a:srgbClr val="2A9D8F"/></a:accent3><a:accent4><a:srgbClr val="7AA6C2"/></a:accent4><a:accent5><a:srgbClr val="8AB17D"/></a:accent5><a:accent6><a:srgbClr val="E9C46A"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="AquaGest"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="AquaGest"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>',
+      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><fonts count="2"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FFFFFFFF"/><sz val="11"/><scheme val="minor"/></font></fonts><fills count="3"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
+      "docProps/core.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEscape(title || "Relatório AquaGest Pro") + '</dc:title><dc:creator>AquaGest Pro</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00Z</dcterms:created></cp:coreProperties>',
+      "docProps/app.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>AquaGest Pro</Application><AppVersion>1.0</AppVersion></Properties>'
     };
     list.forEach(function (sh) { files["xl/worksheets/sheet" + sh.index + ".xml"] = worksheetXml(sh.rows); });
     return createZip(files);
@@ -38752,7 +38810,7 @@
   }
 
   function toPdfLines(rows, title) {
-    var lines = ["AquaGest Lite", title || "Relatório técnico do ciclo", ""];
+    var lines = ["AquaGest Pro", title || "Relatório técnico do ciclo", ""];
     (Array.isArray(rows) ? rows : []).forEach(function (row) {
       var text = Array.isArray(row) ? row.map(cleanText).join(" | ") : cleanText(row);
       wrapPdfText(text, 96).forEach(function (line) { lines.push(line); });
@@ -38772,7 +38830,7 @@
       }
     });
     parts.push(asciiBytes("ET\nBT\n/F1 8 Tf\n50 28 Td\n"));
-    parts.push(pdfLiteralBytes("AquaGest Lite - Página " + pageNumber + " de " + pageCount));
+    parts.push(pdfLiteralBytes("AquaGest Pro - Página " + pageNumber + " de " + pageCount));
     parts.push(asciiBytes(" Tj\nET\n"));
     return concatenate(parts);
   }
@@ -38827,15 +38885,267 @@
     return concatenate(parts);
   }
 
-  function downloadPdf(filename, title, html) {
+  /*
+    ============================================================
+    v25 — PDF do relatório em formato de documento
+    Cabeçalho com marca e piscicultura, blocos de indicadores em grade,
+    tabelas com cabeçalho repetido a cada página e rodapé numerado.
+    Fontes padrão do PDF (Helvetica e Helvetica-Bold, WinAnsi); larguras
+    tiradas dos arquivos de métricas AFM oficiais dessas fontes.
+    ============================================================
+  */
+  var HELVETICA_WIDTHS = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,350,556,350,222,556,333,1000,556,556,333,1000,667,333,1000,350,611,350,350,222,222,333,333,350,556,1000,333,1000,500,333,944,350,500,667,278,333,556,556,556,556,260,556,333,737,370,556,584,333,737,333,400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500];
+  var HELVETICA_BOLD_WIDTHS = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584,350,556,350,278,556,500,1000,556,556,333,1000,667,333,1000,350,611,350,350,278,278,500,500,350,556,1000,333,1000,556,333,944,350,500,667,278,333,556,556,556,556,280,556,333,737,370,556,584,333,737,333,400,584,333,333,333,611,556,278,333,333,365,556,834,834,834,611,722,722,722,722,722,722,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,556,556,556,556,556,278,278,278,278,611,611,611,611,611,611,611,584,611,611,611,611,611,556,611,556];
+
+  function pdfTextWidth(text, size, bold) {
+    var table = bold ? HELVETICA_BOLD_WIDTHS : HELVETICA_WIDTHS;
+    var total = 0;
+    String(text === null || text === undefined ? "" : text).split("").forEach(function (character) {
+      var code = pdfByteForCharacter(character);
+      total += code >= 32 ? (table[code - 32] || 556) : 278;
+    });
+    return total * size / 1000;
+  }
+
+  function pdfWrap(text, size, bold, width) {
+    var words = cleanText(text).split(" ");
+    var lines = [];
+    var current = "";
+    words.forEach(function (word) {
+      var candidate = current ? current + " " + word : word;
+      if (!current || pdfTextWidth(candidate, size, bold) <= width) { current = candidate; return; }
+      lines.push(current);
+      current = word;
+    });
+    lines.push(current);
+    return lines.map(function (line) {
+      if (pdfTextWidth(line, size, bold) <= width) return line;
+      var cut = line;
+      while (cut.length > 1 && pdfTextWidth(cut + "…", size, bold) > width) cut = cut.slice(0, -1);
+      return cut + "…";
+    });
+  }
+
+  /* Lê o HTML do relatório na ordem em que aparece na tela. */
+  function buildReportModel(title, html) {
+    var model = { title: cleanText(title) || "Relatório técnico", generatedAt: "", blocks: [] };
+    if (typeof DOMParser === "undefined") {
+      model.blocks.push({ type: "note", text: cleanText(String(html || "").replace(/<[^>]*>/g, " ")) });
+      return model;
+    }
+    var body = new DOMParser().parseFromString("<div>" + String(html || "") + "</div>", "text/html").body;
+    var toolbarSpan = body.querySelector(".toolbar-title span");
+    if (toolbarSpan) model.generatedAt = cleanText(toolbarSpan.textContent);
+    var selector = "h4, .reports-info-grid, .reports-summary-grid, .reports-status-box, table, .reports-empty";
+    Array.prototype.forEach.call(body.querySelectorAll(selector), function (element) {
+      var classes = " " + (element.className || "") + " ";
+      if (element.tagName === "H4") {
+        model.blocks.push({ type: "heading", text: cleanText(element.textContent) });
+      } else if (classes.indexOf(" reports-info-grid ") >= 0 || classes.indexOf(" reports-summary-grid ") >= 0) {
+        var items = [];
+        Array.prototype.forEach.call(element.querySelectorAll(".reports-info-item, .reports-summary-card"), function (item) {
+          var label = item.querySelector("strong"), value = item.querySelector("span");
+          items.push([cleanText(label ? label.textContent : ""), cleanText(value ? value.textContent : "")]);
+        });
+        if (items.length) model.blocks.push({ type: "pairs", items: items, emphasis: classes.indexOf(" reports-summary-grid ") >= 0 });
+      } else if (classes.indexOf(" reports-status-box ") >= 0) {
+        var strong = element.querySelector("strong"), span = element.querySelector("span");
+        model.blocks.push({ type: "note", label: cleanText(strong ? strong.textContent : ""), text: cleanText(span ? span.textContent : element.textContent) });
+      } else if (element.tagName === "TABLE") {
+        var head = [], rows = [];
+        Array.prototype.forEach.call(element.querySelectorAll("tr"), function (tr) {
+          var cells = Array.prototype.map.call(tr.querySelectorAll("th, td"), function (cell) { return cleanText(cell.textContent); });
+          if (!cells.some(function (cell) { return cell !== ""; })) return;
+          if (!head.length && tr.querySelector("th")) head = cells; else rows.push(cells);
+        });
+        model.blocks.push({ type: "table", head: head, rows: rows });
+      } else if (classes.indexOf(" reports-empty ") >= 0) {
+        model.blocks.push({ type: "note", text: cleanText(element.textContent) });
+      }
+    });
+    return model;
+  }
+
+  function pdfColor(hex, stroke) {
+    var value = String(hex).replace("#", "");
+    var r = parseInt(value.slice(0, 2), 16) / 255, g = parseInt(value.slice(2, 4), 16) / 255, b = parseInt(value.slice(4, 6), 16) / 255;
+    return r.toFixed(3) + " " + g.toFixed(3) + " " + b.toFixed(3) + (stroke ? " RG\n" : " rg\n");
+  }
+
+  function createReportPdf(model, meta) {
+    var info = meta || {};
+    var W = 595, H = 842, M = 40, CW = W - 2 * M;
+    var TOP = H - 96, BOTTOM = 56;
+    var C = { brand: "0F766E", brandDark: "0B4F4A", ink: "1F2933", muted: "5B6B73", line: "CBDEDB", soft: "EEF7F5", zebra: "F7FBFA", white: "FFFFFF" };
+    var pages = [];
+    var page = null, y = 0;
+
+    function newPage() { page = []; pages.push(page); y = TOP; }
+    function raw(text) { page.push(asciiBytes(text)); }
+    /* ² e ³ desenhados como expoente (menor e elevado), sem depender do glifo da fonte do leitor de PDF. */
+    function text(x, yy, value, size, bold, color) {
+      var font = "/" + (bold ? "F2" : "F1") + " ";
+      raw("BT\n" + pdfColor(color || C.ink) + font + size + " Tf\n" + x.toFixed(2) + " " + yy.toFixed(2) + " Td\n");
+      String(value === null || value === undefined ? "" : value).split(/([\u00b2\u00b3])/).forEach(function (segment) {
+        if (!segment) return;
+        if (segment === "\u00b2" || segment === "\u00b3") {
+          raw(font + (size * 0.62).toFixed(2) + " Tf " + (size * 0.38).toFixed(2) + " Ts\n");
+          page.push(pdfLiteralBytes(segment === "\u00b2" ? "2" : "3"));
+          raw(" Tj\n0 Ts " + font + size + " Tf\n");
+          return;
+        }
+        page.push(pdfLiteralBytes(segment));
+        raw(" Tj\n");
+      });
+      raw("ET\n");
+    }
+    function rect(x, yy, w, h, fill, stroke) {
+      if (fill) raw(pdfColor(fill) + x.toFixed(2) + " " + yy.toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re f\n");
+      if (stroke) raw("0.6 w\n" + pdfColor(stroke, true) + x.toFixed(2) + " " + yy.toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re S\n");
+    }
+    function line(x1, y1, x2, y2, color, width) { raw((width || 0.6) + " w\n" + pdfColor(color || C.line, true) + x1.toFixed(2) + " " + y1.toFixed(2) + " m " + x2.toFixed(2) + " " + y2.toFixed(2) + " l S\n"); }
+    function ensure(height) { if (y - height < BOTTOM) newPage(); }
+
+    newPage();
+
+    model.blocks.forEach(function (block) {
+      if (block.type === "heading") {
+        ensure(40);
+        y -= 18;
+        text(M, y, block.text, 12, true, C.brand);
+        y -= 6;
+        line(M, y, M + CW, y, C.brand, 0.8);
+        y -= 8;
+      } else if (block.type === "pairs") {
+        var columns = 3, gap = 8, cellW = (CW - gap * (columns - 1)) / columns;
+        for (var start = 0; start < block.items.length; start += columns) {
+          var group = block.items.slice(start, start + columns);
+          var wrapped = group.map(function (pair) { return pdfWrap(pair[1], 10.5, true, cellW - 16); });
+          var maxLines = wrapped.reduce(function (m, l) { return Math.max(m, l.length); }, 1);
+          var cellH = 22 + maxLines * 13;
+          ensure(cellH + gap);
+          group.forEach(function (pair, index) {
+            var x = M + index * (cellW + gap);
+            rect(x, y - cellH, cellW, cellH, block.emphasis ? C.soft : C.white, C.line);
+            text(x + 8, y - 13, pair[0], 7.8, true, C.muted);
+            wrapped[index].forEach(function (value, k) { text(x + 8, y - 27 - k * 13, value, 10.5, true, C.ink); });
+          });
+          y -= cellH + gap;
+        }
+      } else if (block.type === "note") {
+        var noteLines = pdfWrap(block.text, 10, false, CW - 24);
+        var noteH = 14 + (block.label ? 14 : 0) + noteLines.length * 13;
+        ensure(noteH + 8);
+        rect(M, y - noteH, CW, noteH, C.soft, C.line);
+        rect(M, y - noteH, 3, noteH, C.brand);
+        var ty = y - 15;
+        if (block.label) { text(M + 12, ty, block.label, 9, true, C.brandDark); ty -= 14; }
+        noteLines.forEach(function (value) { text(M + 12, ty, value, 10, false, C.ink); ty -= 13; });
+        y -= noteH + 8;
+      } else if (block.type === "table") {
+        var head = block.head.length ? block.head : (block.rows[0] || []).map(function () { return ""; });
+        var count = Math.max(head.length, block.rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0));
+        if (!count) return;
+        var natural = [];
+        for (var c = 0; c < count; c += 1) {
+          var widest = pdfTextWidth(head[c] || "", 8.5, true);
+          block.rows.forEach(function (r) { widest = Math.max(widest, pdfTextWidth(r[c] || "", 9, false)); });
+          natural.push(Math.max(widest + 12, 40));
+        }
+        var sum = natural.reduce(function (a, b) { return a + b; }, 0);
+        var widths = natural.map(function (w) { return w * CW / sum; });
+        var numericPattern = /^-?[\d.]+(,\d+)?( ?(g|kg|%|g\/dia|mg\/L|°C|peixes|kg\/m³))?$/;
+        var numericColumn = widths.map(function (w, i) {
+          var filled = block.rows.filter(function (r) { return (r[i] || "") !== "" && r[i] !== "-"; });
+          return filled.length > 0 && filled.every(function (r) { return numericPattern.test(r[i]); });
+        });
+        var drawRow = function (cells, header, zebra) {
+          var cellLines = widths.map(function (w, i) { return pdfWrap(cells[i] || "", header ? 8.5 : 9, header, w - 10); });
+          var rowH = 8 + cellLines.reduce(function (m, l) { return Math.max(m, l.length); }, 1) * 11;
+          rect(M, y - rowH, CW, rowH, header ? C.brand : (zebra ? C.zebra : C.white));
+          var x = M;
+          cellLines.forEach(function (linesOfCell, i) {
+            var numeric = numericColumn[i];
+            linesOfCell.forEach(function (value, k) {
+              var size = header ? 8.5 : 9;
+              var tx = numeric ? x + widths[i] - 5 - pdfTextWidth(value, size, header) : x + 5;
+              text(tx, y - 11 - k * 11, value, size, header, header ? C.white : C.ink);
+            });
+            x += widths[i];
+          });
+          line(M, y - rowH, M + CW, y - rowH, C.line, 0.5);
+          y -= rowH;
+          return rowH;
+        };
+        ensure(22 + 20);
+        drawRow(head, true, false);
+        block.rows.forEach(function (row, index) {
+          if (y - 22 < BOTTOM) { newPage(); drawRow(head, true, false); }
+          drawRow(row, false, index % 2 === 1);
+        });
+        y -= 10;
+      }
+    });
+
+    /* Cabeçalho e rodapé em todas as páginas. */
+    var farm = cleanText(info.farmName);
+    var stamp = cleanText(info.generatedAt || model.generatedAt);
+    if (!/^Gerado em/i.test(stamp)) {
+      var now = new Date();
+      stamp = "Gerado em " + String(now.getDate()).padStart(2, "0") + "/" + String(now.getMonth() + 1).padStart(2, "0") + "/" + now.getFullYear();
+    }
+    var total = pages.length;
+    var streams = pages.map(function (parts, index) {
+      page = [];
+      rect(0, H - 76, W, 76, C.brand);
+      text(M, H - 40, "AquaGest Pro", 19, true, C.white);
+      text(M, H - 58, model.title, 11, false, C.white);
+      if (farm) text(W - M - pdfTextWidth(farm, 10, true), H - 40, farm, 10, true, C.white);
+      if (stamp) text(W - M - pdfTextWidth(stamp, 8.5, false), H - 56, stamp, 8.5, false, C.white);
+      line(M, 40, W - M, 40, C.line, 0.6);
+      var left = "AquaGest Pro" + (farm ? " — " + farm : "") + " — valores calculados a partir dos registros do produtor";
+      text(M, 28, left, 7.5, false, C.muted);
+      var right = "Página " + (index + 1) + " de " + total;
+      text(W - M - pdfTextWidth(right, 7.5, false), 28, right, 7.5, false, C.muted);
+      return concatenate(page.concat(parts));
+    });
+
+    var objects = [];
+    var fontRegular = 3 + total * 2, fontBold = fontRegular + 1;
+    objects[1] = asciiBytes("<< /Type /Catalog /Pages 2 0 R >>");
+    var kids = [];
+    streams.forEach(function (content, index) {
+      var pageObject = 3 + index * 2;
+      kids.push(pageObject + " 0 R");
+      objects[pageObject] = asciiBytes("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + W + " " + H + "] /Resources << /Font << /F1 " + fontRegular + " 0 R /F2 " + fontBold + " 0 R >> >> /Contents " + (pageObject + 1) + " 0 R >>");
+      objects[pageObject + 1] = concatenate([asciiBytes("<< /Length " + content.length + " >>\nstream\n"), content, asciiBytes("\nendstream")]);
+    });
+    objects[2] = asciiBytes("<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + total + " >>");
+    objects[fontRegular] = asciiBytes("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    objects[fontBold] = asciiBytes("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    var titleInfo = fontBold + 1;
+    objects[titleInfo] = concatenate([asciiBytes("<< /Title "), pdfLiteralBytes(model.title + (farm ? " — " + farm : "")), asciiBytes(" /Producer (AquaGest Pro) >>")]);
+
+    var parts = [new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a])];
+    var position = parts[0].length, offsets = [0];
+    for (var n = 1; n <= titleInfo; n += 1) {
+      var bodyBytes = objects[n] || asciiBytes("null");
+      var prefix = asciiBytes(n + " 0 obj\n"), suffix = asciiBytes("\nendobj\n");
+      offsets[n] = position;
+      parts.push(prefix, bodyBytes, suffix);
+      position += prefix.length + bodyBytes.length + suffix.length;
+    }
+    var xref = "xref\n0 " + (titleInfo + 1) + "\n0000000000 65535 f \n";
+    for (var k = 1; k <= titleInfo; k += 1) xref += paddedOffset(offsets[k]) + " 00000 n \n";
+    xref += "trailer\n<< /Size " + (titleInfo + 1) + " /Root 1 0 R /Info " + titleInfo + " 0 R >>\nstartxref\n" + position + "\n%%EOF\n";
+    parts.push(asciiBytes(xref));
+    return concatenate(parts);
+  }
+
+  function downloadPdf(filename, title, html, meta) {
     var outputName = String(filename || "relatorio-aquagest.pdf").replace(/\.pdf$/i, "");
-    var bytes = createPdf(toSpreadsheetRows(title, html), title);
-    var blob = new Blob([bytes], { type: "application/pdf" });
-    var url = URL.createObjectURL(blob), link = document.createElement("a");
-    link.href = url;
-    link.download = outputName + ".pdf";
-    link.click();
-    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    var bytes = createReportPdf(buildReportModel(title, html), meta);
+    downloadBytes(outputName + ".pdf", bytes, "application/pdf");
   }
 
   function printPdf(title, html) {
@@ -38855,11 +39165,15 @@
     toSpreadsheetRows: toSpreadsheetRows,
     createXlsx: createXlsx,
     createXlsxWorkbook: createXlsxWorkbook,
+    excelDateSerial: excelDateSerial,
     downloadWorkbook: downloadWorkbook,
     downloadMatrixCsv: downloadMatrixCsv,
     matrixToCsv: matrixToCsv,
     fileStamp: fileStamp,
     createPdf: createPdf,
+    createReportPdf: createReportPdf,
+    buildReportModel: buildReportModel,
+    pdfTextWidth: pdfTextWidth,
     downloadCsv: downloadCsv,
     downloadExcel: downloadExcel,
     downloadPdf: downloadPdf,
@@ -38874,7 +39188,7 @@
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/relatorios-ui-v2.js
   Etapa: Relatórios técnicos
   Versão: relatorios-ui-v2-consolidado
@@ -39032,6 +39346,21 @@
     );
   }
 
+  /* v25: status do ciclo em português (o banco grava em inglês). */
+  function cycleStatusLabel(value) {
+    var key =
+      String(value || "").toLowerCase();
+
+    return ({
+      active: "Em andamento",
+      inactive: "Inativo",
+      closed: "Encerrado",
+      finished: "Encerrado",
+      harvested: "Despescado",
+      voided: "Cancelado"
+    })[key] || (value ? String(value) : "-");
+  }
+
   function formatDensity(value) {
     var number =
       toNumber(value);
@@ -39108,7 +39437,7 @@
     }
 
     console.log(
-      "[AquaGest Lite]",
+      "[AquaGest Pro]",
       message
     );
   }
@@ -39751,7 +40080,9 @@
 
         ${infoItem(
           "Status do ciclo",
-          cycle.status
+          cycleStatusLabel(
+            cycle.status
+          )
         )}
 
       </div>
@@ -39948,11 +40279,22 @@
           )}
 
           ${infoItem(
-            "Amônia média",
+            "Amônia total (TAN) média",
             averages.ammoniaMgL !== null
               ? formatNumber(
                   averages.ammoniaMgL,
                   3
+                ) +
+                " mg/L"
+              : "-"
+          )}
+
+          ${infoItem(
+            "NH3 (não ionizada) média",
+            averages.nh3MgL !== null && averages.nh3MgL !== undefined
+              ? formatNumber(
+                  averages.nh3MgL,
+                  4
                 ) +
                 " mg/L"
               : "-"
@@ -40286,15 +40628,31 @@
     });
   }
 
-  function exportPdf() {
+  /* v25: nome do arquivo com a piscicultura e a data, como no Excel geral e no CSV. */
+  async function currentFarmName() {
+    try {
+      var property = window.PisciculturaService && window.PisciculturaService.getCurrentProperty
+        ? await window.PisciculturaService.getCurrentProperty()
+        : null;
+      return property && property.name ? String(property.name) : "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  async function exportPdf() {
     if (!lastReport || !window.RelatoriosExportService) return;
-    window.RelatoriosExportService.downloadPdf(lastReport.filename + ".pdf", lastReport.title, lastReport.html);
+    var X = window.RelatoriosExportService;
+    var farm = await currentFarmName();
+    X.downloadPdf(X.fileStamp(farm, lastReport.title, "pdf"), lastReport.title, lastReport.html, { farmName: farm });
     showMessage("Relatório PDF baixado.", "success");
   }
 
-  function exportExcel() {
+  async function exportExcel() {
     if (!lastReport || !window.RelatoriosExportService) return;
-    window.RelatoriosExportService.downloadExcel(lastReport.filename + ".xlsx", lastReport.title, lastReport.html);
+    var X = window.RelatoriosExportService;
+    var farm = await currentFarmName();
+    X.downloadExcel(X.fileStamp(farm, lastReport.title, "xlsx"), lastReport.title, lastReport.html);
     showMessage("Relatório Excel (.xlsx) baixado.", "success");
   }
 
@@ -40539,7 +40897,7 @@
         init().catch(
           function (error) {
             console.error(
-              "[AquaGest Lite] Erro ao inicializar Relatórios:",
+              "[AquaGest Pro] Erro ao inicializar Relatórios:",
               error
             );
           }
@@ -40553,7 +40911,7 @@
     init().catch(
       function (error) {
         console.error(
-          "[AquaGest Lite] Erro ao inicializar Relatórios:",
+          "[AquaGest Pro] Erro ao inicializar Relatórios:",
           error
         );
       }
@@ -40820,7 +41178,7 @@
 
 /* ===== js/services/estoque-service.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/estoque-service.js
   Etapa: 9 / Pacote 9.3 — Exclusão segura no Estoque Global
   Versão: estoque-service-v3.2-exclusao-segura
@@ -42975,7 +43333,7 @@
 
 /* ===== js/ui/estoque-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/estoque-ui.js
   Etapa: 9 / Pacote 9.3 — Exclusão segura no Estoque Global
   Versão: estoque-ui-v3.2-exclusao-segura
@@ -44708,7 +45066,7 @@
 
 /* ===== js/services/financeiro-service.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/services/financeiro-service.js
   Etapa: 10 — Financeiro
   Versão: financeiro-service-v1-fluxo-caixa-custo-produtivo
@@ -46724,7 +47082,7 @@
 
 /* ===== js/ui/financeiro-ui.js ===== */
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/financeiro-ui.js
   Etapa: 10 — Financeiro
   Versão: financeiro-ui-v1-fluxo-caixa-custo-produtivo
@@ -48486,7 +48844,7 @@ function getIncomeCategoryOptionsHtml() {
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/ui/date-fields-ui.js
   Etapa: infraestrutura global de campos de data
   Versão: date-fields-ui-v5-nativo-estavel
@@ -49413,7 +49771,7 @@ function getIncomeCategoryOptionsHtml() {
 ;
 
 /* ===== js/ui/configuracoes-ui.js ===== */
-/* AquaGest Lite — controles de backup, restauração e armazenamento persistente. */
+/* AquaGest Pro — controles de backup, restauração e armazenamento persistente. */
 (function () {
   "use strict";
 
@@ -49445,8 +49803,8 @@ function getIncomeCategoryOptionsHtml() {
         '<h3>Backup e restauração</h3>' +
         '<p>Exporte os dados da piscicultura atual para um arquivo JSON. Guarde-o fora do aparelho para recuperar a produção em caso de limpeza do navegador ou troca de dispositivo.</p>' +
         '<div class="settings-actions">' +
-          '<button type="button" class="btn btn-primary" id="backupExportBtn">Exportar backup</button>' +
-          '<button type="button" class="btn btn-secondary" id="backupImportBtn">Importar backup</button>' +
+          '<button type="button" class="secondary-btn aq-btn-strong" id="backupExportBtn">Exportar backup</button>' +
+          '<button type="button" class="secondary-btn" id="backupImportBtn">Importar backup</button>' +
           '<input type="file" id="backupFileInput" accept="application/json,.json" hidden />' +
         '</div>' +
         '<p id="backupStatus" class="backup-status" role="status"></p>' +
@@ -49455,13 +49813,13 @@ function getIncomeCategoryOptionsHtml() {
         '<div class="section-kicker">Armazenamento</div>' +
         '<h3>Preservar dados neste aparelho</h3>' +
         '<p>O navegador pode liberar armazenamento local quando o espaço fica baixo. Solicite armazenamento persistente para reduzir esse risco.</p>' +
-        '<button type="button" class="btn btn-secondary" id="persistentStorageBtn">Solicitar armazenamento persistente</button>' +
+        '<button type="button" class="secondary-btn" id="persistentStorageBtn">Solicitar armazenamento persistente</button>' +
       '</section>' +
       '<section class="page-card settings-ml-card">' +
         '<div class="section-kicker">Pesquisa e melhoria</div>' +
         '<h3>Contribuição opcional para os modelos</h3>' +
         '<p>Prepare um arquivo anonimizado com indicadores de biometria para pesquisa e melhoria do TGC/Machine Learning. Nenhum dado é enviado automaticamente.</p>' +
-        '<button type="button" class="btn btn-secondary" id="mlDatasetExportBtn">Exportar dataset anonimizado</button>' +
+        '<button type="button" class="secondary-btn" id="mlDatasetExportBtn">Exportar dataset anonimizado</button>' +
         '<p id="mlDataStatus" class="backup-status" role="status"></p>' +
       '</section>';
   }
@@ -49697,9 +50055,9 @@ function getIncomeCategoryOptionsHtml() {
     if (cfg) {
       var last = localStorage.getItem("aq_last_backup"), late = !last || Date.now() - Number(last) > 7 * DAY;
       card("aq-backup", cfg, "<h3>Backup protegido e alertas</h3>" + (late ? "<p>🟡 Faz mais de 7 dias sem backup.</p>" : "<p>Último backup: " + new Date(Number(last)).toLocaleDateString("pt-BR") + ".</p>") +
-        '<p><input type="password" id="aq-pw" placeholder="Senha do backup (mín. 8)" autocomplete="new-password"> <button type="button" id="aq-bk">Criar backup criptografado</button></p>' +
-        '<p><input type="file" id="aq-rf" accept=".aqbak,application/json"> <input type="password" id="aq-rp" placeholder="Senha" autocomplete="off"> <button type="button" id="aq-rs">Restaurar</button></p>' +
-        '<p><button type="button" id="aq-nt">Ativar notificações</button> <span id="aq-msg"></span></p>');
+        '<p><input type="password" id="aq-pw" placeholder="Senha do backup (mín. 8)" autocomplete="new-password"> <button type="button" class="secondary-btn" id="aq-bk">Criar backup criptografado</button></p>' +
+        '<p><input type="file" id="aq-rf" accept=".aqbak,application/json"> <input type="password" id="aq-rp" placeholder="Senha" autocomplete="off"> <button type="button" class="secondary-btn" id="aq-rs">Restaurar</button></p>' +
+        '<p><button type="button" class="secondary-btn" id="aq-nt">Ativar notificações</button> <span id="aq-msg"></span></p>');
       var msg = function (t) { document.getElementById("aq-msg").textContent = t; };
       document.getElementById("aq-bk").onclick = async function () { var pw = document.getElementById("aq-pw").value; if (pw.length < 8) return msg("Use uma senha de pelo menos 8 caracteres. Sem ela, o backup não abre."); try { msg("Criptografando..."); await shareOrDownload(await encryptBackup(await root.BackupService.exportDatabase(), pw)); localStorage.setItem("aq_last_backup", String(Date.now())); msg("Backup criado."); } catch (e) { msg(e.message); } };
       document.getElementById("aq-rs").onclick = async function () { var f = document.getElementById("aq-rf").files[0]; if (!f) return msg("Escolha o arquivo."); try { var env = JSON.parse(await f.text()); var data = env.format === "aquagest-backup-criptografado" ? await decryptBackup(env, document.getElementById("aq-rp").value) : env; if (!confirm("Restaurar substitui/mescla os dados atuais. Continuar?")) return; await root.BackupService.importDatabase(data); msg("Restaurado. Recarregue o app."); } catch (e) { msg(e.message); } };
@@ -49849,9 +50207,9 @@ function getIncomeCategoryOptionsHtml() {
       "<br><strong>App instalado:</strong> " + (status.standalone ? "sim" : "não") + " · <strong>Service worker:</strong> " + esc(status.sw) + "</p>" +
       "<p><small>Os dados ficam presos a este endereço. Se o endereço mudar, o app abre vazio, mas os dados continuam no endereço anterior. Restaure um backup para trazê-los.</small></p>" +
       "<div style='overflow-x:auto'><table><thead><tr><th>Tabela</th><th>Registros</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
-      "<p><button type=\"button\" id=\"aq-d-persist\">Proteger dados (armazenamento permanente)</button> " +
+      "<p><button type=\"button\" class=\"secondary-btn\" id=\"aq-d-persist\">Proteger dados (armazenamento permanente)</button> " +
       (deferredInstall ? '<button type="button" id="aq-d-install">Instalar app</button> ' : "") +
-      (OFFICIAL_URL ? "<button type=\"button\" id=\"aq-d-oficial\">Abrir endereço oficial</button> " : "") + "<span id=\"aq-d-msg\"></span></p>";
+      (OFFICIAL_URL ? "<button type=\"button\" class=\"secondary-btn\" id=\"aq-d-oficial\">Abrir endereço oficial</button> " : "") + "<span id=\"aq-d-msg\"></span></p>";
     var msg = function (t) { var m = document.getElementById("aq-d-msg"); if (m) m.textContent = t; };
     document.getElementById("aq-d-persist").onclick = async function () {
       try {
@@ -49888,7 +50246,7 @@ function getIncomeCategoryOptionsHtml() {
 // @ts-nocheck
 
 /*
-  AquaGest Lite
+  AquaGest Pro
   Arquivo: js/app.js
   Etapa: integração global do aplicativo
   Versão: app-flow-v5-async-estrutura-forte
@@ -49923,7 +50281,7 @@ function getIncomeCategoryOptionsHtml() {
   var screenTitles = {
     dashboard: {
       title: "Painel",
-      subtitle: "Visão geral do AquaGest Lite"
+      subtitle: "Visão geral do AquaGest Pro"
     },
 
     piscicultura: {
@@ -50160,6 +50518,9 @@ function getIncomeCategoryOptionsHtml() {
     showElement("publicArea");
     hideElement("appArea");
 
+    /* v25: mensagens da área interna (ex.: "Login realizado...") não ficam presas na tela de entrada. */
+    clearSystemMessage();
+
     if (document.body) {
       document.body.classList.remove(
         "sidebar-open"
@@ -50373,7 +50734,7 @@ function getIncomeCategoryOptionsHtml() {
       ui.init();
     } catch (error) {
       console.warn(
-        "[AquaGest Lite] Falha ao inicializar " +
+        "[AquaGest Pro] Falha ao inicializar " +
           globalName +
           ":",
         error
@@ -50419,7 +50780,7 @@ function getIncomeCategoryOptionsHtml() {
         window.AquaGestDateFieldsUI.init();
       } catch (error) {
         console.warn(
-          "[AquaGest Lite] Falha ao inicializar campos de data:",
+          "[AquaGest Pro] Falha ao inicializar campos de data:",
           error
         );
       }
@@ -50799,7 +51160,7 @@ function getIncomeCategoryOptionsHtml() {
           );
       } catch (error) {
         console.warn(
-          "[AquaGest Lite] Não foi possível registrar a tela atual:",
+          "[AquaGest Pro] Não foi possível registrar a tela atual:",
           error
         );
       }
@@ -50811,7 +51172,7 @@ function getIncomeCategoryOptionsHtml() {
       target
     ).catch(function (error) {
       console.warn(
-        "[AquaGest Lite] Falha ao atualizar a tela:",
+        "[AquaGest Pro] Falha ao atualizar a tela:",
         error
       );
     });
@@ -51275,7 +51636,7 @@ function getIncomeCategoryOptionsHtml() {
       try {
         await window.BackupService.requestPersistentStorage();
       } catch (storageError) {
-        console.warn("[AquaGest Lite] Armazenamento persistente não disponível:", storageError);
+        console.warn("[AquaGest Pro] Armazenamento persistente não disponível:", storageError);
       }
     }
 
@@ -51977,7 +52338,7 @@ function getIncomeCategoryOptionsHtml() {
       try {
         await window.BackupService.requestPersistentStorage();
       } catch (storageError) {
-        console.warn("[AquaGest Lite] Armazenamento persistente não disponível:", storageError);
+        console.warn("[AquaGest Pro] Armazenamento persistente não disponível:", storageError);
       }
     }
 
@@ -52253,7 +52614,7 @@ function getIncomeCategoryOptionsHtml() {
         error &&
           error.message
           ? error.message
-          : "Erro durante a inicialização do AquaGest Lite.",
+          : "Erro durante a inicialização do AquaGest Pro.",
         "error"
       );
     } finally {
@@ -52278,7 +52639,7 @@ function getIncomeCategoryOptionsHtml() {
         initApp().catch(
           function (error) {
             console.error(
-              "[AquaGest Lite] Falha crítica na inicialização:",
+              "[AquaGest Pro] Falha crítica na inicialização:",
               error
             );
           }
@@ -52292,7 +52653,7 @@ function getIncomeCategoryOptionsHtml() {
     initApp().catch(
       function (error) {
         console.error(
-          "[AquaGest Lite] Falha crítica na inicialização:",
+          "[AquaGest Pro] Falha crítica na inicialização:",
           error
         );
       }
