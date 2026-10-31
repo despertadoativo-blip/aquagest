@@ -49892,6 +49892,20 @@ function getIncomeCategoryOptionsHtml() {
     element.className = "backup-status " + (type || "");
   }
 
+  /* v26.2: o app instalado não tem botão de recarregar do navegador; o botão fica junto da mensagem. */
+  function addReloadButton() {
+    var element = document.getElementById("backupStatus");
+    if (!element || document.getElementById("backupReloadBtn")) return;
+    var button = document.createElement("button");
+    button.type = "button";
+    button.id = "backupReloadBtn";
+    button.className = "aq-btn-strong";
+    button.textContent = "Recarregar agora";
+    button.style.marginLeft = "10px";
+    button.addEventListener("click", function () { window.location.reload(); });
+    element.appendChild(button);
+  }
+
   function ensureScreen() {
     var screen = document.getElementById("screen-configuracoes");
     if (!screen || document.getElementById("backupExportBtn")) return;
@@ -49979,9 +49993,10 @@ function getIncomeCategoryOptionsHtml() {
         window.BackupService.validateBackup(backup);
         if (!window.confirm("Importar este backup irá mesclar os registros no aparelho. Continuar?")) return;
         var result = await window.BackupService.importDatabase(backup);
-        setStatus(result.imported + " registros restaurados. Recarregue o aplicativo para atualizar as telas.", "success");
+        setStatus(result.imported + " registros restaurados. Toque em Recarregar agora para atualizar as telas.", "success");
+        addReloadButton();
         if (window.AquaGestApp && typeof window.AquaGestApp.showMessage === "function") {
-          window.AquaGestApp.showMessage("Backup restaurado. Recarregue o aplicativo para conferir todos os módulos.", "success");
+          window.AquaGestApp.showMessage("Backup restaurado. Toque em Recarregar agora, na tela Configurações.", "success");
         }
       } catch (error) {
         setStatus(error.message || "Não foi possível importar o backup.", "error");
