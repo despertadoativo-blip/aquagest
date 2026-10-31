@@ -4613,6 +4613,49 @@
   };
 })();
 
+/*
+  v26.4 — nome do lote em português para as telas (nunca o código interno "cycle_…").
+  Formato igual ao da tela Desempenho: "V01 — Tilápia / Juvenil (povoado em 02/03/2026)".
+  Cache síncrono, recarregado ao abrir o app e a cada troca de tela.
+*/
+(function () {
+  "use strict";
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  var cache = {};
+  function text(v) { return String(v === null || v === undefined ? "" : v).trim(); }
+  function brDate(v) { var p = text(v).slice(0, 10).split("-"); return p.length === 3 && p[0].length === 4 ? p[2] + "/" + p[1] + "/" + p[0] : ""; }
+  function build(c) {
+    if (c.name || c.code) return text(c.name || c.code);
+    var base = (c.pondName || "Viveiro") + (c.species ? " — " + c.species + (c.category ? " / " + c.category : "") : "");
+    var start = brDate(c.startDate || c.stockingDate);
+    return base + (start ? " (povoado em " + start + ")" : "");
+  }
+  async function refresh() {
+    try {
+      if (!window.database || typeof window.database.getAll !== "function") return cache;
+      var list = await window.database.getAll("production_cycles");
+      var next = {};
+      (list || []).forEach(function (c) { if (c && c.id) next[c.id] = build(c); });
+      cache = next;
+    } catch (e) { /* banco ainda não aberto */ }
+    return cache;
+  }
+  /* label(id, pondName): nome do lote; sem cadastro encontrado, usa o viveiro — nunca mostra o código. */
+  function label(id, pondName) {
+    var key = text(id);
+    if (!key) return "Não informado";
+    if (cache[key]) return cache[key];
+    return pondName ? "Lote do viveiro " + pondName : "Lote não identificado";
+  }
+  window.AquaGestLotLabels = { refresh: refresh, label: label, build: build };
+  document.addEventListener("click", function (event) {
+    var target = event.target && event.target.closest ? event.target.closest("[data-screen]") : null;
+    if (target) refresh();
+  }, true);
+  var tries = 0;
+  if (typeof setTimeout === "function") (function boot() { refresh().then(function (c) { if (!Object.keys(c).length && tries++ < 20) setTimeout(boot, 500); }); })();
+})();
+
 ;
 
 /* ===== js/core/ml-data-service.js ===== */
@@ -4825,7 +4868,13 @@
         a essa conta, que mantém a própria senha; as referências ao usuário do backup passam para ela;
       - a conta existente pertence a outra piscicultura: a importação é recusada sem gravar nada.
     */
-    var userRemap = await resolveUserConflicts(tables.users || []);
+    /*
+      v26.3 — a conta em uso ainda não tem piscicultura e o backup traz uma piscicultura:
+      os dados passam a ser desta conta (ela fica dona da piscicultura e mantém e-mail e senha).
+      Assim o produtor vê os dados importados sem trocar de conta.
+    */
+    var adoption = backupScope.type === "producer" ? null : await resolveAdoption(tables);
+    var userRemap = adoption ? adoption.userRemap : await resolveUserConflicts(tables.users || []);
 
     Object.keys(tables).forEach(function (storeName) {
       if (currentScope && window.AquaGestIsolation && typeof window.AquaGestIsolation.validateRecords === "function") {
@@ -4858,8 +4907,13 @@
       }
     }
 
+    if (adoption && window.AuthService && typeof window.AuthService.updateCurrentUserProperty === "function") {
+      await window.AuthService.updateCurrentUserProperty(adoption.propertyId);
+    }
+
     return {
       imported: imported,
+      linkedToCurrentUser: !!adoption,
       databaseVersion: Number(backup.databaseVersion),
       importedAt: new Date().toISOString()
     };
@@ -4867,6 +4921,22 @@
 
   function normalizeEmail(value) {
     return String(value || "").trim().toLowerCase();
+  }
+
+  async function resolveAdoption(tables) {
+    var properties = (tables.properties || []).filter(function (p) { return p && !p.deleted; });
+    if (properties.length !== 1) return null;
+    var session = window.AuthService && typeof window.AuthService.getCurrentUser === "function" ? window.AuthService.getCurrentUser() : null;
+    if (!session || !session.id) return null;
+    var stored = (await window.database.getAll("users")).find(function (user) { return user && user.id === session.id; });
+    if (!stored || stored.propertyId) return null;
+    var userRemap = { byId: {}, idMap: {} };
+    (tables.users || []).forEach(function (backupUser) {
+      userRemap.byId[backupUser.id] = stored;
+      userRemap.idMap[backupUser.id] = stored.id;
+    });
+    if (!(tables.users || []).length) tables.users = [];
+    return { propertyId: properties[0].id, userRemap: userRemap, user: stored };
   }
 
   async function resolveUserConflicts(backupUsers) {
@@ -13168,11 +13238,35 @@
     hideElement("pondsEmptyState");
     showElement("pondsTableWrapper");
 
+    /*
+      v26.4: no celular cada viveiro ocupa uma tela inteira e o produtor via só o primeiro.
+      Resumo no topo com a quantidade e um botão para ir direto a cada viveiro.
+    */
+    var summary = document.createElement("div");
+    summary.id = "pondsSummary";
+    summary.className = "pond-summary";
+    summary.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px";
+    var count = document.createElement("strong");
+    count.textContent = ponds.length + (ponds.length === 1 ? " viveiro cadastrado:" : " viveiros cadastrados:");
+    summary.appendChild(count);
+    ponds.forEach(function (pond, index) {
+      var jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "secondary-btn";
+      jump.textContent = pond.name || "Viveiro " + (index + 1);
+      jump.addEventListener("click", function () {
+        var target = document.getElementById("pondCard_" + index);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      summary.appendChild(jump);
+    });
+    wrapper.appendChild(summary);
+
     var list = document.createElement("div");
     list.id = "pondsCardList";
     list.className = "pond-card-list";
 
-    ponds.forEach(function (pond) {
+    ponds.forEach(function (pond, pondIndex) {
       var statusText = window.ViveirosService.translateStatus(pond.status);
       var aerationText = buildAerationText(pond);
       var isInactive = pond.status === "inactive";
@@ -13182,6 +13276,7 @@
 
       var card = document.createElement("article");
       card.className = "pond-card";
+      card.id = "pondCard_" + pondIndex;
 
       card.innerHTML =
         '<div class="pond-card-header">' +
@@ -13996,6 +14091,10 @@
         "production_supplier"
       ], "")),
 
+      /* v26.5 — campos da ficha da cooperativa (Copacol: "Lote" e "Mortos aloj."). */
+      cooperativeLotNumber: normalizeText(firstValue(input, ["cooperativeLotNumber", "production_cooperativeLotNumber"], "")),
+      stockingMortality: Math.max(0, Math.round(toNumber(firstValue(input, ["stockingMortality", "production_stockingMortality"], 0)) || 0)),
+
       quantity: Math.floor(toNumber(firstValue(input, [
         "quantity",
         "quantityInitial",
@@ -14413,6 +14512,8 @@
       species: stocking.species || "Tilápia",
       category: stocking.category || "",
       supplier: stocking.supplier || "",
+      cooperativeLotNumber: stocking.cooperativeLotNumber || "",
+      stockingMortality: toNumber(stocking.stockingMortality) || 0,
       startDate: normalizeIsoDate(stocking.startDate || stocking.date || ""),
 
       quantityInitial: toNumber(stocking.quantity),
@@ -14782,6 +14883,8 @@
       species: input.species || "Tilápia",
       category: input.category,
       supplier: input.supplier,
+      cooperativeLotNumber: input.cooperativeLotNumber,
+      stockingMortality: input.stockingMortality,
       startDate: input.startDate,
 
       quantityInitial: metrics.quantity,
@@ -14831,6 +14934,8 @@
       startDate: input.startDate,
 
       supplier: input.supplier,
+      cooperativeLotNumber: input.cooperativeLotNumber,
+      stockingMortality: input.stockingMortality,
       category: input.category,
       species: cycle.species,
 
@@ -14980,6 +15085,8 @@
       species: input.species || "Tilápia",
       category: input.category,
       supplier: input.supplier,
+      cooperativeLotNumber: input.cooperativeLotNumber,
+      stockingMortality: input.stockingMortality,
       startDate: input.startDate,
 
       quantityInitial: metrics.quantity,
@@ -15026,6 +15133,8 @@
       startDate: input.startDate,
 
       supplier: input.supplier,
+      cooperativeLotNumber: input.cooperativeLotNumber,
+      stockingMortality: input.stockingMortality,
       category: input.category,
       species: updatedCycle.species,
 
@@ -15124,6 +15233,8 @@
       species: firstValue(cycle, ["species"], firstValue(stocking, ["species"], "Tilápia")),
       category: firstValue(cycle, ["category"], firstValue(stocking, ["category"], "")),
       supplier: firstValue(cycle, ["supplier"], firstValue(stocking, ["supplier"], "")),
+      cooperativeLotNumber: firstValue(cycle, ["cooperativeLotNumber"], firstValue(stocking, ["cooperativeLotNumber"], "")),
+      stockingMortality: firstValue(cycle, ["stockingMortality"], firstValue(stocking, ["stockingMortality"], "")),
 
       quantity: firstValue(cycle, ["quantityInitial", "currentQuantity"], firstValue(stocking, ["quantity"], "")),
       averageWeightG: firstValue(cycle, ["initialAverageWeightG", "currentAverageWeightG"], firstValue(stocking, ["averageWeightG"], "")),
@@ -16074,6 +16185,9 @@
             ).value
           : "",
 
+      cooperativeLotNumber: getElement("production_cooperativeLotNumber") ? getElement("production_cooperativeLotNumber").value : "",
+      stockingMortality: getElement("production_stockingMortality") ? getElement("production_stockingMortality").value : "",
+
       quantity:
         getElement(
           "production_quantity"
@@ -16301,6 +16415,8 @@
       "production_supplier",
       ""
     );
+    setValue("production_cooperativeLotNumber", "");
+    setValue("production_stockingMortality", "");
 
     setValue(
       "production_quantity",
@@ -17178,6 +17294,8 @@
         "production_supplier",
         model.supplier || ""
       );
+      setValue("production_cooperativeLotNumber", model.cooperativeLotNumber || "");
+      setValue("production_stockingMortality", model.stockingMortality || "");
 
       setValue(
         "production_quantity",
@@ -28508,7 +28626,7 @@
     (cycles || []).forEach(function (cycle) {
       var id = cycle.id || cycle.cycleId;
       if (!id) return;
-      var label = cycle.label || cycle.name || cycle.pondName || ("Lote " + id);
+      var label = cycle.label || cycle.name || (window.AquaGestLotLabels ? window.AquaGestLotLabels.build(cycle) : cycle.pondName || "Lote");
       var option = document.createElement("option"); option.value = id; option.textContent = label; select.appendChild(option);
     });
     if (current) select.value = current;
@@ -28943,6 +29061,10 @@
         "alkalinityCaCO3MgL",
         "water_alkalinityMgL"
       ]),
+
+      /* v26.5 — transparência (disco de Secchi, cm), coluna "Transp." da ficha da Copacol. Só registro, sem regra. */
+      transparencyCm: toNumber(firstValue(input, ["transparencyCm", "water_transparencyCm"], 0)),
+      hasTransparencyCm: hasValue(input, ["transparencyCm", "water_transparencyCm"]),
 
       notes: normalizeText(firstValue(input, [
         "notes",
@@ -29817,6 +29939,8 @@
       nh3MgL: input.hasNh3MgL || input.hasTanMgL ? round(metrics.nh3MgL, 4) : null,
       nitriteMgL: input.hasNitriteMgL ? round(input.nitriteMgL, 3) : null,
       alkalinityMgL: input.hasAlkalinityMgL ? round(input.alkalinityMgL, 2) : null,
+      transparencyCm: input.hasTransparencyCm ? round(input.transparencyCm, 1) : null,
+      hasTransparencyCm: !!input.hasTransparencyCm,
 
       hasAmmoniaTotalMgL: !!input.hasAmmoniaTotalMgL,
       hasTanMgL: !!input.hasTanMgL,
@@ -30154,6 +30278,7 @@
       ammoniaTotalMgL: item.hasAmmoniaTotalMgL ? item.ammoniaTotalMgL : "",
       nitriteMgL: item.hasNitriteMgL ? item.nitriteMgL : "",
       alkalinityMgL: item.hasAlkalinityMgL ? item.alkalinityMgL : "",
+      transparencyCm: item.hasTransparencyCm ? item.transparencyCm : "",
 
       technicalStatus: item.technicalStatus || "",
       technicalSeverity: item.technicalSeverity || "",
@@ -30504,6 +30629,11 @@
             '</div>' +
 
             '<div>' +
+              '<label for="water_transparencyCm">Transparência (cm)</label>' +
+              '<input id="water_transparencyCm" name="transparencyCm" type="number" step="1" min="0" inputmode="decimal" placeholder="Opcional" />' +
+            '</div>' +
+
+            '<div>' +
               '<label for="water_technicalStatus">Classificação</label>' +
               '<input id="water_technicalStatus" name="technicalStatus" type="text" readonly value="Aguardando dados" />' +
             '</div>' +
@@ -30575,6 +30705,7 @@
       nh3MgL: getElement("water_nh3MgL") ? getElement("water_nh3MgL").value : "",
       nitriteMgL: getElement("water_nitriteMgL") ? getElement("water_nitriteMgL").value : "",
       alkalinityMgL: getElement("water_alkalinityMgL") ? getElement("water_alkalinityMgL").value : "",
+      transparencyCm: getElement("water_transparencyCm") ? getElement("water_transparencyCm").value : "",
 
       notes: getElement("water_notes") ? getElement("water_notes").value : "",
 
@@ -30610,6 +30741,7 @@
     setValue("water_nh3MgL", "");
     setValue("water_nitriteMgL", "");
     setValue("water_alkalinityMgL", "");
+    setValue("water_transparencyCm", "");
     setValue("water_notes", "");
 
     setValue("water_technicalStatus", "Aguardando dados");
@@ -31111,6 +31243,7 @@
       setValue("water_nh3MgL", record.hasNh3MgL ? record.nh3MgL || "" : "");
       setValue("water_nitriteMgL", record.hasNitriteMgL ? record.nitriteMgL || "" : "");
       setValue("water_alkalinityMgL", record.hasAlkalinityMgL ? record.alkalinityMgL || "" : "");
+      setValue("water_transparencyCm", record.hasTransparencyCm ? record.transparencyCm || "" : "");
       setValue("water_notes", record.notes || "");
 
       setFormMode(true);
@@ -35629,7 +35762,7 @@
             ' kg — origem: ' +
             escapeHtml(record.stockOriginPondName || record.pondName || "Viveiro") +
             ' / lote ' +
-            escapeHtml(record.stockOriginCycleId || record.cycleId || record.productionCycleId || "") +
+            escapeHtml((window.AquaGestLotLabels ? window.AquaGestLotLabels.label(record.stockOriginCycleId || record.cycleId || record.productionCycleId, record.stockOriginPondName || record.pondName) : "Não informado")) +
           '</span>' +
         '</div>' +
 
@@ -38814,6 +38947,44 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
   }
 
+  /*
+    v26.4 — rastreabilidade: todo PDF e Excel leva o cadastro da piscicultura e do responsável
+    (tela Piscicultura), o código de registro e quem exportou. Campo vazio = "Não informado".
+  */
+  function propertyIdentificationRows(property, user) {
+    var p = property || {}, u = user || {};
+    var value = function (v) { var t = String(v === null || v === undefined ? "" : v).trim(); return t || "Não informado"; };
+    var code = "";
+    try { code = window.PisciculturaService && window.PisciculturaService.formatPropertyCode ? window.PisciculturaService.formatPropertyCode(p.id) : ""; } catch (e) { code = ""; }
+    var area = p.area !== undefined && p.area !== null && String(p.area).trim() !== ""
+      ? Number(p.area).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " " + (p.areaUnit || "")
+      : "";
+    var now = new Date();
+    return [
+      ["Piscicultura", value(p.name)],
+      ["Código de registro", value(code)],
+      ["Responsável", value(p.ownerName)],
+      ["CPF/CNPJ", value(p.document)],
+      ["E-mail", value(p.email)],
+      ["Celular", value(p.phone)],
+      ["Endereço", value(p.address)],
+      ["Município/UF", value([p.city, p.state].filter(Boolean).join(" / "))],
+      ["Área", value(area.trim())],
+      ["Tipo de produção", value(p.productionType)],
+      ["Sistema de cultivo", value(p.systemType)],
+      ["Exportado por", value([u.name, u.email ? "(" + u.email + ")" : ""].filter(Boolean).join(" "))],
+      ["Gerado em", now.toLocaleDateString("pt-BR") + " " + now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })]
+    ];
+  }
+
+  function propertyIdentificationHtml(property, user) {
+    var esc = function (t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
+    return "<h4>Identificação da piscicultura</h4><div class=\"reports-info-grid\">" +
+      propertyIdentificationRows(property, user).map(function (row) {
+        return "<div class=\"reports-info-item\"><strong>" + esc(row[0]) + "</strong><span>" + esc(row[1]) + "</span></div>";
+      }).join("") + "</div>";
+  }
+
   function downloadWorkbook(filename, sheets, title) {
     downloadBytes(filename, createXlsxWorkbook(sheets, title), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   }
@@ -39068,7 +39239,9 @@
 
   function createReportPdf(model, meta) {
     var info = meta || {};
-    var W = 595, H = 842, M = 40, CW = W - 2 * M;
+    /* v26.5: meta.landscape = folha deitada (A4 paisagem), como as fichas de papel das cooperativas. */
+    var landscape = !!info.landscape;
+    var W = landscape ? 842 : 595, H = landscape ? 595 : 842, M = landscape ? 32 : 40, CW = W - 2 * M;
     var TOP = H - 96, BOTTOM = 56;
     var C = { brand: "0F766E", brandDark: "0B4F4A", ink: "1F2933", muted: "5B6B73", line: "CBDEDB", soft: "EEF7F5", zebra: "F7FBFA", white: "FFFFFF" };
     var pages = [];
@@ -39104,14 +39277,15 @@
 
     model.blocks.forEach(function (block) {
       if (block.type === "heading") {
-        ensure(40);
+        /* v26.5: em paisagem o título não fica sozinho no pé da página (vai junto com o que vem abaixo). */
+        ensure(landscape ? 150 : 40);
         y -= 18;
         text(M, y, block.text, 12, true, C.brand);
         y -= 6;
         line(M, y, M + CW, y, C.brand, 0.8);
         y -= 8;
       } else if (block.type === "pairs") {
-        var columns = 3, gap = 8, cellW = (CW - gap * (columns - 1)) / columns;
+        var columns = landscape ? 4 : 3, gap = 8, cellW = (CW - gap * (columns - 1)) / columns;
         for (var start = 0; start < block.items.length; start += columns) {
           var group = block.items.slice(start, start + columns);
           var wrapped = group.map(function (pair) { return pdfWrap(pair[1], 10.5, true, cellW - 16); });
@@ -39142,7 +39316,8 @@
         if (!count) return;
         var natural = [];
         for (var c = 0; c < count; c += 1) {
-          var widest = pdfTextWidth(head[c] || "", 8.5, true);
+          /* Em paisagem o cabeçalho quebra em linhas e não rouba largura das colunas de números. */
+          var widest = landscape ? Math.min(pdfTextWidth(head[c] || "", 8.5, true), 52) : pdfTextWidth(head[c] || "", 8.5, true);
           block.rows.forEach(function (r) { widest = Math.max(widest, pdfTextWidth(r[c] || "", 9, false)); });
           natural.push(Math.max(widest + 12, 40));
         }
@@ -39171,7 +39346,8 @@
           y -= rowH;
           return rowH;
         };
-        ensure(22 + 20);
+        /* v26.5: em paisagem o cabeçalho da tabela só começa se couberem ele e pelo menos 3 linhas. */
+        ensure(landscape ? 110 : 22 + 20);
         drawRow(head, true, false);
         block.rows.forEach(function (row, index) {
           if (y - 22 < BOTTOM) { newPage(); drawRow(head, true, false); }
@@ -39261,6 +39437,8 @@
     createXlsxWorkbook: createXlsxWorkbook,
     excelDateSerial: excelDateSerial,
     downloadWorkbook: downloadWorkbook,
+    propertyIdentificationRows: propertyIdentificationRows,
+    propertyIdentificationHtml: propertyIdentificationHtml,
     downloadMatrixCsv: downloadMatrixCsv,
     matrixToCsv: matrixToCsv,
     fileStamp: fileStamp,
@@ -40734,11 +40912,22 @@
     }
   }
 
+  /* v26.4: cadastro da piscicultura e do responsável no início do PDF e do Excel (rastreabilidade). */
+  async function identificationHtml() {
+    try {
+      var property = window.PisciculturaService && window.PisciculturaService.getCurrentProperty ? await window.PisciculturaService.getCurrentProperty() : null;
+      var user = window.AuthService && window.AuthService.getCurrentUser ? window.AuthService.getCurrentUser() : null;
+      return window.RelatoriosExportService.propertyIdentificationHtml(property, user);
+    } catch (error) {
+      return "";
+    }
+  }
+
   async function exportPdf() {
     if (!lastReport || !window.RelatoriosExportService) return;
     var X = window.RelatoriosExportService;
     var farm = await currentFarmName();
-    X.downloadPdf(X.fileStamp(farm, lastReport.title, "pdf"), lastReport.title, lastReport.html, { farmName: farm });
+    X.downloadPdf(X.fileStamp(farm, lastReport.title, "pdf"), lastReport.title, (await identificationHtml()) + lastReport.html, { farmName: farm });
     showMessage("Relatório PDF baixado.", "success");
   }
 
@@ -40746,7 +40935,7 @@
     if (!lastReport || !window.RelatoriosExportService) return;
     var X = window.RelatoriosExportService;
     var farm = await currentFarmName();
-    X.downloadExcel(X.fileStamp(farm, lastReport.title, "xlsx"), lastReport.title, lastReport.html);
+    X.downloadExcel(X.fileStamp(farm, lastReport.title, "xlsx"), lastReport.title, (await identificationHtml()) + lastReport.html);
     showMessage("Relatório Excel (.xlsx) baixado.", "success");
   }
 
@@ -41128,6 +41317,14 @@
     return [header].concat(records.map(function (r) { return module.columns.map(function (c) { return c[1](r, ctx); }); }));
   }
 
+  function currentUser() {
+    try { return window.AuthService && window.AuthService.getCurrentUser ? window.AuthService.getCurrentUser() : null; } catch (e) { return null; }
+  }
+  /* v26.4: aba "Piscicultura" com o cadastro e o responsável em todo Excel (rastreabilidade). */
+  function identificationSheet(property) {
+    return { name: "Piscicultura", rows: [["Cadastro da piscicultura", "Informação"]].concat(window.RelatoriosExportService.propertyIdentificationRows(property, currentUser())) };
+  }
+
   async function currentProperty() {
     try { return window.PisciculturaService && window.PisciculturaService.getCurrentProperty ? (await window.PisciculturaService.getCurrentProperty()) || {} : {}; } catch (e) { return {}; }
   }
@@ -41172,7 +41369,7 @@
 
   async function buildAllSheets(property) {
     var ctx = await buildContext();
-    var sheets = [{ name: "Resumo", rows: await summaryRows(property) }];
+    var sheets = [identificationSheet(property), { name: "Resumo", rows: await summaryRows(property) }];
     for (var i = 0; i < MODULES.length; i += 1) {
       sheets.push({ name: MODULES[i].title, rows: await moduleRows(MODULES[i], ctx) });
     }
@@ -41195,7 +41392,7 @@
     var property = await currentProperty();
     var rows = await moduleRows(module, await buildContext());
     if (kind === "csv") X.downloadMatrixCsv(X.fileStamp(property.name, module.title, "csv"), rows);
-    else X.downloadWorkbook(X.fileStamp(property.name, module.title, "xlsx"), [{ name: module.title, rows: rows }], module.title);
+    else X.downloadWorkbook(X.fileStamp(property.name, module.title, "xlsx"), [identificationSheet(property), { name: module.title, rows: rows }], module.title);
     msg((kind === "csv" ? "CSV" : "Excel") + " de " + module.title + " gerado.");
     return rows;
   }
@@ -42256,7 +42453,7 @@
     if (input.linkedEntityType === "feeding_record" || input.sourceModule === "Arraçoamento") {
       return "Arraçoamento — " +
         (input.pondName || "viveiro não informado") +
-        (input.cycleId ? " — lote " + input.cycleId : "");
+        (input.cycleId ? " — lote " + (window.AquaGestLotLabels ? window.AquaGestLotLabels.label(input.cycleId, input.pondName) : "do viveiro") : "");
     }
 
     return input.reason || "Movimentação manual";
@@ -44495,7 +44692,7 @@
         '<span>' +
           'Arraçoamento' +
           ' — Viveiro: ' + escapeHtml(movement.pondName || "Não informado") +
-          ' — Lote: ' + escapeHtml(movement.cycleId || movement.productionCycleId || "Não informado") +
+          ' — Lote: ' + escapeHtml((window.AquaGestLotLabels ? window.AquaGestLotLabels.label(movement.cycleId || movement.productionCycleId, movement.pondName) : "Não informado")) +
           ' — Data: ' + escapeHtml(formatDate(movement.feedingRecordDate || movement.date || "")) +
         '</span>' +
       '</div>'
@@ -48233,7 +48430,7 @@ function getIncomeCategoryOptionsHtml() {
 
         '<div class="pond-card-info">' +
           '<strong>Vínculo produtivo</strong>' +
-          '<span>Viveiro: ' + escapeHtml(transaction.pondName || "Não informado") + ' — Lote: ' + escapeHtml(transaction.cycleId || transaction.productionCycleId || "Não informado") + '</span>' +
+          '<span>Viveiro: ' + escapeHtml(transaction.pondName || "Não informado") + ' — Lote: ' + escapeHtml((window.AquaGestLotLabels ? window.AquaGestLotLabels.label(transaction.cycleId || transaction.productionCycleId, transaction.pondName) : "Não informado")) + '</span>' +
         '</div>' +
 
         '<div class="pond-card-info">' +
@@ -48285,7 +48482,7 @@ function getIncomeCategoryOptionsHtml() {
         '<div class="pond-card-header">' +
           '<div>' +
             '<h4>' + escapeHtml(item.pondName || "Viveiro não informado") + '</h4>' +
-            '<span>Lote: ' + escapeHtml(item.cycleId || "Não informado") + '</span>' +
+            '<span>Lote: ' + escapeHtml((window.AquaGestLotLabels ? window.AquaGestLotLabels.label(item.cycleId, item.pondName) : "Não informado")) + '</span>' +
           '</div>' +
           '<span class="badge">Custo produtivo</span>' +
         '</div>' +
@@ -49993,7 +50190,7 @@ function getIncomeCategoryOptionsHtml() {
         window.BackupService.validateBackup(backup);
         if (!window.confirm("Importar este backup irá mesclar os registros no aparelho. Continuar?")) return;
         var result = await window.BackupService.importDatabase(backup);
-        setStatus(result.imported + " registros restaurados. Toque em Recarregar agora para atualizar as telas.", "success");
+        setStatus(result.imported + " registros restaurados" + (result.linkedToCurrentUser ? " e ligados à sua conta" : "") + ". Toque em Recarregar agora para ver os dados.", "success");
         addReloadButton();
         if (window.AquaGestApp && typeof window.AquaGestApp.showMessage === "function") {
           window.AquaGestApp.showMessage("Backup restaurado. Toque em Recarregar agora, na tela Configurações.", "success");
@@ -50052,14 +50249,30 @@ function getIncomeCategoryOptionsHtml() {
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function brl(v) { return num(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
   function live(r) { return r && !r.deleted; }
-  async function all(store) { try { return (await root.database.getAll(store)).filter(live); } catch (e) { return []; } }
+  /* v26.4: só os registros da piscicultura em uso (antes apareciam lotes de outras contas do aparelho). */
+  async function all(store) {
+    try {
+      var list = (await root.database.getAll(store)).filter(live);
+      var iso = root.AquaGestIsolation;
+      return iso && typeof iso.getScope === "function" && typeof iso.filterRecords === "function" ? iso.filterRecords(store, list, iso.getScope()) : list;
+    } catch (e) { return []; }
+  }
+  function brDate(v) { var p = String(v || "").slice(0, 10).split("-"); return p.length === 3 && p[0].length === 4 ? p[2] + "/" + p[1] + "/" + p[0] : ""; }
+  /* v26.4: nome do lote em português, como na tela Desempenho: "V01 — Tilápia / Juvenil (povoado em 20/07/2026)". */
+  function lotLabel(c) {
+    if (c.name || c.code) return String(c.name || c.code);
+    var base = (c.pondName || "Viveiro") + (c.species ? " — " + c.species + (c.category ? " / " + c.category : "") : "");
+    var start = brDate(c.startDate);
+    return base + (start ? " (povoado em " + start + ")" : "");
+  }
+  function kg2(v) { return num(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
   /* ---------- 1. ALERTAS (regras puras, testáveis) ---------- */
   function buildAlerts(d, now) {
     now = now || Date.now();
     var out = [], cycles = (d.cycles || []).filter(function (c) { return CLOSED.indexOf(String(c.status || "").toLowerCase()) < 0; });
     cycles.forEach(function (c) {
-      var name = c.name || c.code || "Lote";
+      var name = lotLabel(c);
       /* SENAR (2018, Coleção 208, p. 72): biometria quinzenal no início; mensal a partir de 200 g. */
       var lastBio = (d.biometries || []).filter(function (b) { return b.cycleId === c.id; }).reduce(function (m, b) { return !m || ts(b.date) > ts(m.date) ? b : m; }, null);
       var last = lastBio ? ts(lastBio.date) : 0;
@@ -50070,9 +50283,11 @@ function getIncomeCategoryOptionsHtml() {
       if (wq && wq.dissolvedOxygenMgL != null && wq.dissolvedOxygenMgL !== "" && num(wq.dissolvedOxygenMgL) < 4) out.push({ level: "danger", text: name + ": oxigênio dissolvido baixo (" + num(wq.dissolvedOxygenMgL) + " mg/L). Ligue os aeradores." });
     });
     (d.inventory || []).forEach(function (i) {
-      if (num(i.minimumStock) > 0 && num(i.currentQuantity) <= num(i.minimumStock)) out.push({ level: "warn", text: "Estoque baixo: " + (i.name || "item") + "." });
+      /* v26.4: o saldo do estoque fica em currentStock (currentQuantity não existe e dava sempre "estoque baixo"). */
+      var balance = i.currentStock !== undefined && i.currentStock !== null && i.currentStock !== "" ? i.currentStock : i.currentQuantity;
+      if (num(i.minimumStock) > 0 && num(balance) <= num(i.minimumStock)) out.push({ level: "warn", text: "Estoque baixo: " + (i.itemName || i.name || "item") + " (" + kg2(balance) + " " + (i.unit || "") + "; mínimo " + kg2(i.minimumStock) + ")." });
       var exp = ts(i.expirationDate);
-      if (exp && exp - now < 15 * DAY) out.push({ level: exp < now ? "danger" : "warn", text: (i.name || "Item") + (exp < now ? " está vencido." : " vence em menos de 15 dias.") });
+      if (exp && exp - now < 15 * DAY) out.push({ level: exp < now ? "danger" : "warn", text: (i.itemName || i.name || "Item") + (exp < now ? " está vencido." : " vence em menos de 15 dias.") });
     });
     return out;
   }
@@ -50134,7 +50349,7 @@ function getIncomeCategoryOptionsHtml() {
       var sales = (d.sales || []).filter(function (s) { return s.cycleId === c.id; });
       var kg = sales.reduce(function (m, s) { return m + num(s.quantityKg || s.weightKg || s.totalWeightKg || s.quantity); }, 0);
       income = Math.max(income, sales.reduce(function (m, s) { return m + num(s.totalValue); }, 0));
-      return { name: c.name || c.code || c.id, cost: cost, kg: kg, income: income, perKg: kg > 0 ? cost / kg : null, margin: income - cost, price: kg > 0 ? income / kg : null };
+      return { name: lotLabel(c), cost: cost, kg: kg, income: income, perKg: kg > 0 ? cost / kg : null, margin: income - cost, price: kg > 0 ? income / kg : null };
     });
   }
 
@@ -50167,7 +50382,7 @@ function getIncomeCategoryOptionsHtml() {
     if (b) b.onclick = async function () { try { var a = await loadWeather(); document.getElementById("aq-wx").innerHTML = "Clima: " + esc(a.text); } catch (e) { document.getElementById("aq-wx").textContent = "Clima indisponível (permita a localização e conecte-se à internet)."; } };
     notify(al);
     if (fin) {
-      var rows = costPerKg(d).map(function (x) { return "<tr><td>" + esc(x.name) + "</td><td>" + brl(x.cost) + "</td><td>" + x.kg.toFixed(1) + " kg</td><td>" + (x.perKg == null ? "—" : brl(x.perKg)) + "</td><td>" + (x.price == null ? "—" : brl(x.price)) + "</td><td>" + brl(x.margin) + "</td></tr>"; }).join("");
+      var rows = costPerKg(d).map(function (x) { return "<tr><td>" + esc(x.name) + "</td><td>" + brl(x.cost) + "</td><td>" + kg2(x.kg) + " kg</td><td>" + (x.perKg == null ? "—" : brl(x.perKg)) + "</td><td>" + (x.price == null ? "—" : brl(x.price)) + "</td><td>" + brl(x.margin) + "</td></tr>"; }).join("");
       card("aq-custokg", fin, "<h3>Custo por kg produzido</h3><div style='overflow-x:auto'><table><thead><tr><th>Lote</th><th>Custo</th><th>Vendido</th><th>Custo/kg</th><th>Preço/kg</th><th>Resultado</th></tr></thead><tbody>" + (rows || "<tr><td colspan=6>Sem lotes.</td></tr>") + "</tbody></table></div><p><small>Considera despesas e vendas vinculadas ao lote. Custo/kg aparece após a primeira venda.</small></p>");
     }
     if (cfg) {
@@ -50356,6 +50571,363 @@ function getIncomeCategoryOptionsHtml() {
     document.addEventListener("click", function (e) { if (e.target && e.target.closest && e.target.closest("[data-screen]")) setTimeout(refresh, 500); });
     setInterval(refresh, 10 * 60000);
   }
+})();
+
+;
+
+/* ===== js/ui/fichas-cooperativa-ui.js ===== */
+/*
+  AquaGest Pro — v26.5: fichas no modelo das cooperativas (PDF e Excel).
+  O produtor escolhe o lote e o modelo na tela Relatórios:
+  - Modelo Primato: "Controle de desempenho por viveiro" (uma linha por visita; a visita 1 é o alojamento).
+  - Modelo Copacol: "Controle de biometria", "Controle da água" e
+    "Controle diário de manejo (arraçoamento, mortalidade e temperatura)".
+  Colunas, nomes e ordem seguem as fichas de papel. Nenhuma fórmula nova:
+  os valores vêm dos registros do app (biometria, água, arraçoamento, movimentação).
+  Cálculos só de soma/subtração/divisão simples, indicados em cada nota.
+*/
+(function () {
+  "use strict";
+
+  function txt(v) { return v === null || v === undefined ? "" : String(v).trim(); }
+  function num(v) { var n = window.AquaGestNumber ? window.AquaGestNumber.parse(v) : Number(v); return Number.isFinite(n) ? n : 0; }
+  function has(v) { return v !== null && v !== undefined && String(v).trim() !== ""; }
+  function r(v, d) { var f = Math.pow(10, d); return Math.round((num(v) + Number.EPSILON) * f) / f; }
+  function brDate(iso) { var p = txt(iso).slice(0, 10).split("-"); return p.length === 3 && p[0].length === 4 ? p[2] + "/" + p[1] + "/" + p[0] : txt(iso); }
+  function esc(t) { return String(t === null || t === undefined ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function fmt(v, d) {
+    if (v === "" || v === null || v === undefined || v === "-") return v === "-" ? "-" : "";
+    if (typeof v !== "number") return String(v);
+    return v.toLocaleString("pt-BR", { minimumFractionDigits: d === undefined ? 0 : d, maximumFractionDigits: d === undefined ? 0 : d });
+  }
+  function live(x) { return x && !x.deleted; }
+  function byDate(a, b) { return (txt(a.date) + txt(a.time)).localeCompare(txt(b.date) + txt(b.time)); }
+  function sameCycle(cycleId) { return function (x) { return x.cycleId === cycleId || x.productionCycleId === cycleId; }; }
+
+  async function readAll(store) {
+    try {
+      var list = (await window.database.getAll(store)).filter(live);
+      var iso = window.AquaGestIsolation;
+      return iso && iso.getScope && iso.filterRecords ? iso.filterRecords(store, list, iso.getScope()) : list;
+    } catch (e) { return []; }
+  }
+
+  async function loadContext(cycleId) {
+    var cycles = await readAll("production_cycles");
+    var cycle = cycles.find(function (c) { return c.id === cycleId; });
+    if (!cycle) throw new Error("Lote não encontrado.");
+    var ponds = await readAll("ponds");
+    var pond = ponds.find(function (p) { return p.id === cycle.pondId; }) || {};
+    var property = window.PisciculturaService && window.PisciculturaService.getCurrentProperty ? (await window.PisciculturaService.getCurrentProperty()) || {} : {};
+    var user = window.AuthService && window.AuthService.getCurrentUser ? window.AuthService.getCurrentUser() : null;
+    return {
+      cycle: cycle, pond: pond, property: property, user: user,
+      biometries: (await readAll("biometries")).filter(sameCycle(cycleId)).sort(byDate),
+      water: (await readAll("water_quality")).filter(sameCycle(cycleId)).sort(byDate),
+      feeding: (await readAll("feeding_records")).filter(sameCycle(cycleId)).sort(byDate),
+      movements: (await readAll("mortality_records")).filter(sameCycle(cycleId)).sort(byDate)
+    };
+  }
+
+  function lotName(c) { return window.AquaGestLotLabels ? window.AquaGestLotLabels.build(c) : txt(c.pondName); }
+
+  /* ---------------- Modelo Primato ---------------- */
+  function primato(ctx) {
+    var c = ctx.cycle;
+    var head = ["Visitas", "Data biometria", "Mortalidade", "Saldo de peixe", "Peso médio (g)", "Biomassa total (kg)",
+      "Total ração no período (kg)", "Total ração do lote (kg)", "Conversão período", "Conversão do geral",
+      "Período visitas (dias)", "GPD período (g/dia)", "T °C"];
+    /* Visita 1 = alojamento, como na ficha (ração e conversão com "-"). */
+    /* Mortalidade da visita 1 = "-": os mortos no alojamento ficam só no cadastro do lote e não mudam o saldo. */
+    var rows = [[1, brDate(c.startDate), "-", num(c.quantityInitial), r(c.initialAverageWeightG, 2), r(c.initialBiomassKg, 2), "-", "-", "-", "-", "-", "-", "-"]];
+    ctx.biometries.forEach(function (b, i) {
+      rows.push([i + 2, brDate(b.date), num(b.mortality), num(b.currentPopulation), r(b.averageWeightG, 2), r(b.currentBiomassKg, 2),
+        r(b.feedPeriodKg, 2), r(b.feedTotalKg, 2), has(b.fcrPeriod) ? r(b.fcrPeriod, 2) : "-", has(b.fcrTotal) ? r(b.fcrTotal, 2) : "-",
+        has(b.periodDays) ? num(b.periodDays) : "-", has(b.gpdGDay) ? r(b.gpdGDay, 2) : "-", has(b.temperatureC) ? r(b.temperatureC, 1) : "-"]);
+    });
+    var decimals = [0, null, 0, 0, 2, 2, 2, 2, 2, 2, 0, 2, 1];
+    return {
+      title: "Controle de desempenho por viveiro",
+      sections: [{
+        title: "CONTROLE DE DESEMPENHO POR VIVEIRO",
+        fields: [["Viveiro", txt(c.pondName || ctx.pond.name)], ["Lote", lotName(c)]],
+        groups: [["INFORMAÇÕES DA BIOMETRIA", 6], ["CONSUMO DE RAÇÃO E CONVERSÃO", 7]],
+        head: head, rows: rows, decimals: decimals,
+        note: "Visita 1 = alojamento do lote. Demais visitas = biometrias registradas no app."
+      }]
+    };
+  }
+
+  /* ---------------- Modelo Copacol ---------------- */
+  function copacolHeader(ctx, withBiometry) {
+    var c = ctx.cycle, p = ctx.property, area = num(ctx.pond.areaM2);
+    var base = [["Produtor", txt(p.ownerName) || "Não informado"], ["Nº tanque", txt(c.pondName || ctx.pond.name)], ["Lote", txt(c.cooperativeLotNumber) || "Não informado"]];
+    if (!withBiometry) return base;
+    return base.concat([
+      ["Data alojamento", brDate(c.startDate)],
+      ["Área (m²)", area ? fmt(r(area, 2), 2) : "Não informado"],
+      ["Nº total peixes", fmt(num(c.quantityInitial), 0)],
+      ["Peso médio inicial (kg)", fmt(r(num(c.initialAverageWeightG) / 1000, 3), 3)],
+      ["Biomassa (kg)", fmt(r(c.initialBiomassKg, 2), 2)],
+      /* Peixes/m² = Nº total peixes ÷ área do viveiro. */
+      ["Peixes/m²", area ? fmt(r(num(c.quantityInitial) / area, 2), 2) : "Não informado"],
+      ["Mortos aloj.", has(c.stockingMortality) ? fmt(num(c.stockingMortality), 0) : "Não informado"]
+    ]);
+  }
+
+  function copacolBiometry(ctx) {
+    var head = ["Data", "Saldo de peixes", "Peixes capturados", "Peso médio (kg)", "Ganho de peso diário (g)", "Biomassa total (kg)",
+      "Ganho de biomassa (kg)", "Ganho de biomassa acumulado (kg)", "Ração do período (kg)", "Conversão período", "Ração acum. (kg)", "Conversão acum."];
+    var rows = ctx.biometries.map(function (b) {
+      return [brDate(b.date), num(b.currentPopulation), num(b.sampleCount), r(num(b.averageWeightG) / 1000, 3), has(b.gpdGDay) ? r(b.gpdGDay, 2) : "-",
+        r(b.currentBiomassKg, 2), r(b.biomassGainPeriodKg, 2), r(b.biomassGainTotalKg, 2), r(b.feedPeriodKg, 2),
+        has(b.fcrPeriod) ? r(b.fcrPeriod, 2) : "-", r(b.feedTotalKg, 2), has(b.fcrTotal) ? r(b.fcrTotal, 2) : "-"];
+    });
+    return {
+      title: "CONTROLE DE BIOMETRIA", fields: copacolHeader(ctx, true),
+      groups: [["INFORMAÇÕES DE BIOMETRIA - SEMANAL", 8], ["CONSUMO DE RAÇÃO E CONVERSÃO", 4]],
+      head: head, rows: rows, decimals: [null, 0, 0, 3, 2, 2, 2, 2, 2, 2, 2, 2],
+      note: "Peso médio em kg, como na ficha (peso em g ÷ 1.000). Ganho de biomassa = biomassa desta biometria − biomassa anterior (a primeira, em relação ao alojamento)."
+    };
+  }
+
+  function copacolWater(ctx) {
+    var head = ["Data", "Hora", "pH", "Amônia (mg/L)", "Alcalinidade (mg/L)", "Nitrito (mg/L)", "Transp. (cm)", "Oxigênio (mg/L)"];
+    var val = function (flag, v, d) { return flag === false || !has(v) ? "-" : r(v, d); };
+    var rows = ctx.water.map(function (w) {
+      var amonia = has(w.ammoniaTotalMgL) ? w.ammoniaTotalMgL : w.tanMgL;
+      return [brDate(w.date), txt(w.time) || "-", val(true, w.ph, 2), val(true, amonia, 2), val(w.hasAlkalinityMgL, w.alkalinityMgL, 2),
+        val(w.hasNitriteMgL, w.nitriteMgL, 2), val(w.hasTransparencyCm, w.transparencyCm, 0), val(true, w.dissolvedOxygenMgL, 2)];
+    });
+    return { title: "CONTROLE DA ÁGUA", fields: copacolHeader(ctx, false), head: head, rows: rows, decimals: [null, null, 2, 2, 2, 2, 0, 2], note: "" };
+  }
+
+  function dailyMortality(ctx) {
+    var map = {};
+    ctx.feeding.forEach(function (f) { var d = txt(f.date).slice(0, 10); map[d] = (map[d] || 0) + num(f.mortalityCount); });
+    ctx.movements.forEach(function (m) {
+      var t = window.FishMovementService ? window.FishMovementService.normalizeType(m.movementType) : txt(m.movementType);
+      if (t !== "mortalidade") return;
+      var d = txt(m.date).slice(0, 10); map[d] = (map[d] || 0) + num(m.quantity);
+    });
+    return map;
+  }
+
+  function copacolDaily(ctx) {
+    var feedByDay = {}, tempByDay = {};
+    ctx.feeding.forEach(function (f) {
+      var d = txt(f.date).slice(0, 10);
+      feedByDay[d] = (feedByDay[d] || 0) + num(f.feedProvidedKg);
+      if (f.hasTemperatureC !== false && has(f.temperatureC) && num(f.temperatureC) > 0) (tempByDay[d] = tempByDay[d] || []).push(num(f.temperatureC));
+    });
+    ctx.water.forEach(function (w) {
+      var d = txt(w.date).slice(0, 10);
+      if (!tempByDay[d] && has(w.temperatureC) && num(w.temperatureC) > 0) tempByDay[d] = [num(w.temperatureC)];
+    });
+    var mort = dailyMortality(ctx);
+    var days = Object.keys(feedByDay).concat(Object.keys(mort), Object.keys(tempByDay)).filter(Boolean).sort();
+    var months = [];
+    days.forEach(function (d) { var m = d.slice(0, 7); if (months.indexOf(m) < 0) months.push(m); });
+    var c = ctx.cycle;
+    /* Total de peixes no início do mês: mesma regra do saldo da tela Arraçoamento
+       (saldo da última biometria — ou nº alojado — menos a mortalidade lançada no arraçoamento depois dela). */
+    function fishAtMonthStart(month) {
+      var start = month + "-01";
+      var bio = ctx.biometries.filter(function (b) { return txt(b.date) < start; }).pop();
+      var base = bio ? num(bio.currentPopulation) : num(c.quantityInitial);
+      var from = bio ? txt(bio.date).slice(0, 10) : "";
+      ctx.feeding.forEach(function (f) { var d = txt(f.date).slice(0, 10); if ((!from || d > from) && d < start) base -= num(f.mortalityCount); });
+      return Math.max(0, base);
+    }
+    return months.map(function (month) {
+      var p = month.split("-"), last = new Date(Number(p[0]), Number(p[1]), 0).getDate(), rows = [];
+      for (var day = 1; day <= last; day += 1) {
+        var key = month + "-" + String(day).padStart(2, "0");
+        var t = tempByDay[key];
+        rows.push([day, has(feedByDay[key]) ? r(feedByDay[key], 2) : "", has(mort[key]) ? num(mort[key]) : "", t ? r(t.reduce(function (a, b) { return a + b; }, 0) / t.length, 1) : ""]);
+      }
+      return {
+        title: "CONTROLE DIÁRIO DE MANEJO (ARRAÇOAMENTO, MORTALIDADE E TEMPERATURA)",
+        fields: copacolHeader(ctx, false).concat([["Mês", p[1] + "/" + p[0]], ["Total peixes (início do mês)", fmt(fishAtMonthStart(month), 0)]]),
+        head: ["Dia", "Ração/dia (kg)", "Mortalidade", "T °C"], rows: rows, decimals: [0, 2, 0, 1],
+        note: "Ração/dia = soma do arraçoamento do dia. Mortalidade = arraçoamento + movimentação do dia. T °C = média do dia."
+      };
+    });
+  }
+
+  function copacol(ctx) {
+    return { title: "Fichas Copacol", sections: [copacolBiometry(ctx), copacolWater(ctx)].concat(copacolDaily(ctx)) };
+  }
+
+  /* ---------------- Saída ---------------- */
+  function sectionHtml(s) {
+    var html = "<h4>" + esc(s.title) + "</h4><div class=\"reports-info-grid\">" +
+      s.fields.map(function (f) { return "<div class=\"reports-info-item\"><strong>" + esc(f[0]) + "</strong><span>" + esc(f[1]) + "</span></div>"; }).join("") + "</div>";
+    html += "<table><thead><tr>" + s.head.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") + "</tr></thead><tbody>" +
+      (s.rows.length ? s.rows.map(function (row) {
+        return "<tr>" + row.map(function (v, i) { return "<td>" + esc(typeof v === "number" ? fmt(v, s.decimals[i] === null ? 0 : s.decimals[i]) : v) + "</td>"; }).join("") + "</tr>";
+      }).join("") : "<tr><td colspan=\"" + s.head.length + "\">Sem registros.</td></tr>") + "</tbody></table>";
+    if (s.note) html += "<p>" + esc(s.note) + "</p>";
+    return html;
+  }
+
+  function sectionSheet(s, name) {
+    var rows = [[s.title, ""]];
+    s.fields.forEach(function (f) { rows.push([f[0], f[1]]); });
+    rows.push([""]);
+    rows.push(s.head);
+    s.rows.forEach(function (row) { rows.push(row); });
+    if (s.note) { rows.push([""]); rows.push(["Observação", s.note]); }
+    return { name: name, rows: rows };
+  }
+
+  async function build(cycleId, model) {
+    var ctx = await loadContext(cycleId);
+    var doc = model === "copacol" ? copacol(ctx) : primato(ctx);
+    doc.context = ctx;
+    return doc;
+  }
+
+  /* PDF: manejo diário com 4 meses lado a lado, como a ficha de papel da Copacol (Dia + Ração/dia, Mortalidade e T °C de cada mês). */
+  function groupDailyForPdf(sections) {
+    var daily = sections.filter(function (s) { return /MANEJO/.test(s.title); });
+    if (!daily.length) return sections;
+    var others = sections.filter(function (s) { return !/MANEJO/.test(s.title); });
+    var groups = [];
+    for (var i = 0; i < daily.length; i += 4) groups.push(daily.slice(i, i + 4));
+    return others.concat(groups.map(function (group) {
+      var head = ["Dia"], rows = [], decimals = [0];
+      group.forEach(function (m) {
+        var month = m.fields[3][1];
+        head.push("Ração/dia (kg) " + month, "Mortalidade " + month, "T °C " + month);
+        decimals.push(2, 0, 1);
+      });
+      for (var day = 1; day <= 31; day += 1) {
+        var row = [day];
+        group.forEach(function (m) { var r0 = m.rows[day - 1]; row.push(r0 ? r0[1] : "", r0 ? r0[2] : "", r0 ? r0[3] : ""); });
+        rows.push(row);
+      }
+      var fields = group[0].fields.slice(0, 3).concat(group.map(function (m) { return ["Total peixes " + m.fields[3][1] + " (início do mês)", m.fields[4][1]]; }));
+      return { title: group[0].title, fields: fields, head: head, rows: rows, decimals: decimals, note: group[0].note };
+    }));
+  }
+
+  async function exportFicha(cycleId, model, kind) {
+    var X = window.RelatoriosExportService;
+    var doc = await build(cycleId, model);
+    var ctx = doc.context;
+    var label = (model === "copacol" ? "Ficha Copacol" : "Ficha Primato") + " " + txt(ctx.cycle.pondName);
+    if (kind === "pdf") {
+      var html = X.propertyIdentificationHtml(ctx.property, ctx.user) + (model === "copacol" ? groupDailyForPdf(doc.sections) : doc.sections).map(sectionHtml).join("");
+      X.downloadPdf(X.fileStamp(ctx.property.name, label, "pdf"), doc.title + " — " + txt(ctx.cycle.pondName), html, { farmName: ctx.property.name, landscape: true });
+    } else {
+      var sheets = [{ name: "Piscicultura", rows: [["Cadastro da piscicultura", "Informação"]].concat(X.propertyIdentificationRows(ctx.property, ctx.user)) }];
+      doc.sections.forEach(function (s, i) {
+        var name = model === "copacol" ? (i === 0 ? "Biometria" : i === 1 ? "Água" : "Manejo " + s.fields[3][1].replace("/", "-")) : "Desempenho";
+        sheets.push(sectionSheet(s, name));
+      });
+      X.downloadWorkbook(X.fileStamp(ctx.property.name, label, "xlsx"), sheets, doc.title);
+    }
+    return doc;
+  }
+
+  /* ---------------- Tela (cartão em Relatórios) ---------------- */
+  async function fillLots() {
+    var select = document.getElementById("fichaLot");
+    if (!select) return;
+    var cycles = (await readAll("production_cycles")).sort(function (a, b) { return txt(b.startDate).localeCompare(txt(a.startDate)); });
+    var current = select.value;
+    select.innerHTML = cycles.length
+      ? cycles.map(function (c) { return "<option value=\"" + esc(c.id) + "\">" + esc(lotName(c)) + "</option>"; }).join("")
+      : "<option value=\"\">Nenhum lote cadastrado</option>";
+    if (current && cycles.some(function (c) { return c.id === current; })) select.value = current;
+  }
+
+  function status(text, type) {
+    var el = document.getElementById("fichaStatus");
+    if (el) { el.textContent = text; el.className = "backup-status " + (type || ""); }
+  }
+
+  /* Aba "Fichas da cooperativa" dentro de Relatórios (mesmo padrão das abas de Produção). */
+  var TAB_KEY = "aquagest_relatorios_tab";
+  function selectTab(tab) {
+    var screen = document.getElementById("screen-relatorios");
+    if (!screen) return;
+    if (tab !== "fichas") tab = "relatorios";
+    screen.setAttribute("data-active-tab", tab);
+    Array.prototype.forEach.call(screen.querySelectorAll("[data-rel-tab-btn]"), function (b) {
+      b.setAttribute("aria-selected", b.getAttribute("data-rel-tab-btn") === tab ? "true" : "false");
+    });
+    try { localStorage.setItem(TAB_KEY, tab); } catch (e) { /* sem storage */ }
+    if (tab === "fichas") fillLots();
+  }
+
+  function mount() {
+    var screen = document.getElementById("screen-relatorios");
+    if (!screen) return;
+    if (!document.getElementById("relatoriosTabs")) {
+      var bar = document.createElement("div");
+      bar.id = "relatoriosTabs";
+      bar.className = "aq-tabs";
+      bar.setAttribute("role", "tablist");
+      bar.setAttribute("aria-label", "Seções dos relatórios");
+      bar.innerHTML =
+        '<button type="button" class="aq-tab" role="tab" data-rel-tab-btn="relatorios" aria-selected="true">Relatórios</button>' +
+        '<button type="button" class="aq-tab" role="tab" data-rel-tab-btn="fichas" aria-selected="false">Fichas da cooperativa</button>';
+      screen.insertBefore(bar, screen.firstChild);
+      bar.addEventListener("click", function (event) {
+        var btn = event.target.closest && event.target.closest("[data-rel-tab-btn]");
+        if (btn) selectTab(btn.getAttribute("data-rel-tab-btn"));
+      });
+    }
+    if (!document.getElementById("fichasCooperativaCard")) {
+      var card = document.createElement("section");
+      card.id = "fichasCooperativaCard";
+      card.className = "page-card";
+      card.innerHTML =
+        "<h3>Fichas da cooperativa</h3>" +
+        "<p>Ficha do lote no mesmo formato do papel da cooperativa, com a identificação da piscicultura e do responsável.</p>" +
+        "<div class=\"form-grid\">" +
+          "<div><label for=\"fichaModel\">Ficha</label><select id=\"fichaModel\">" +
+            "<option value=\"copacol\">Ficha técnica Copacol — Biometria, Água e Manejo diário</option>" +
+            "<option value=\"primato\">Ficha Primato — Controle de desempenho por viveiro</option>" +
+          "</select></div>" +
+          "<div><label for=\"fichaLot\">Lote</label><select id=\"fichaLot\"></select></div>" +
+        "</div>" +
+        "<p style=\"display:flex;gap:8px;flex-wrap:wrap\">" +
+          "<button type=\"button\" class=\"aq-btn-strong\" id=\"fichaPdfBtn\">Baixar PDF</button>" +
+          "<button type=\"button\" class=\"secondary-btn\" id=\"fichaExcelBtn\">Baixar Excel</button>" +
+        "</p><p id=\"fichaStatus\" class=\"backup-status\"></p>";
+      screen.appendChild(card);
+      var run = function (kind) {
+        return async function () {
+          var lot = document.getElementById("fichaLot").value;
+          if (!lot) return status("Escolha um lote.", "error");
+          try {
+            status("Gerando…", "pending");
+            await exportFicha(lot, document.getElementById("fichaModel").value, kind);
+            status((kind === "pdf" ? "PDF" : "Excel") + " da ficha baixado.", "success");
+          } catch (e) { status(e.message || "Não foi possível gerar a ficha.", "error"); }
+        };
+      };
+      document.getElementById("fichaPdfBtn").addEventListener("click", run("pdf"));
+      document.getElementById("fichaExcelBtn").addEventListener("click", run("xlsx"));
+    }
+    var saved = "relatorios";
+    try { saved = localStorage.getItem(TAB_KEY) || "relatorios"; } catch (e) { saved = "relatorios"; }
+    selectTab(screen.getAttribute("data-active-tab") || saved);
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("click", function (event) {
+      var t = event.target && event.target.closest ? event.target.closest('[data-screen="relatorios"]') : null;
+      if (t) setTimeout(mount, 300);
+    }, true);
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { setTimeout(mount, 800); });
+    else setTimeout(mount, 800);
+  }
+
+  window.FichasCooperativa = { build: build, exportFicha: exportFicha, primato: primato, copacol: copacol, sectionSheet: sectionSheet };
 })();
 
 ;

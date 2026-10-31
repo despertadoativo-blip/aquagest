@@ -25,7 +25,7 @@ const CACHE_PREFIX =
   "aquagestpro-";
 
 const CACHE_NAME =
-  "aquagestpro-producao-v26-2-recarregar";
+  "aquagestpro-producao-v26-5-fichas-cooperativa";
 
 /*
   ============================================================

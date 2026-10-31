@@ -4400,3 +4400,7 @@ table thead th {
 #screen-configuracoes input[type="password"], #screen-configuracoes input[type="file"] { max-width: 260px; margin: 4px 8px 4px 0; }
 .nav-item[data-screen="desempenho"]::before { content: "⤴"; }
 .nav-item[data-screen="sanidade"]::before { content: "✚"; }
+
+/* v26.5 — abas de Relatórios: "Relatórios" e "Fichas da cooperativa" (sem repetir módulos). */
+#screen-relatorios[data-active-tab="fichas"] > :not(#relatoriosTabs):not(#fichasCooperativaCard) { display: none !important; }
+#screen-relatorios:not([data-active-tab="fichas"]) > #fichasCooperativaCard { display: none !important; }
