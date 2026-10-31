@@ -25,7 +25,7 @@ const CACHE_PREFIX =
   "aquagestpro-";
 
 const CACHE_NAME =
-  "aquagestpro-producao-v26-importacao-contas";
+  "aquagestpro-producao-v26-1-horarios-tcc";
 
 /*
   ============================================================

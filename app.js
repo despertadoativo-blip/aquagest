@@ -27993,7 +27993,8 @@
   /*
     Limiares de OD para tilápia (mg/L) — Queiroz e Boeira (Embrapa, CT 54, 2016):
     abaixo de 2,0 = aeração de emergência; abaixo de 4,0 = ligar a aeração;
-    período crítico da meia-noite às 7 h. (v26: removida a faixa noturna 4–5 mg/L, sem fonte.)
+    v26: removida a faixa noturna 4–5 mg/L, sem fonte.
+    Horários do lembrete (sem OD medido): Tabela 11 do TCC — 15–17 h mistura, 18–22 h medir, 23–06 h emergência.
   */
   var DO_CRITICAL = 2;
   var DO_TURN_ON = 4;
@@ -28104,18 +28105,21 @@
     if (od < DO_TURN_ON) {
       return { code: "do-turn-on", tone: night ? "critical" : "attention", label: "OD abaixo de " + DO_TURN_ON + " mg/L: ligar a aeração", action: "Ligar a aeração agora" + (data && data.aeratorsRecommended ? " (" + data.aeratorsRecommended + " aerador(es) de referência)" : "") + ", independentemente do horário, e medir o OD novamente em 1 hora." };
     }
-    return { code: "do-ok", tone: "safe", label: "OD adequado (" + round(od, 2) + " mg/L)", action: "Aeração não é necessária agora pelo OD medido. " + (night ? "Repetir a medição na madrugada (00:00–07:00), o período crítico." : "Repetir a medição no fim da tarde e à noite.") };
+    return { code: "do-ok", tone: "safe", label: "OD adequado (" + round(od, 2) + " mg/L)", action: "Aeração não é necessária agora pelo OD medido. " + (night ? "Repetir a medição antes da madrugada (23:00–06:00)." : "Repetir a medição no fim da tarde e à noite.") };
   }
 
   function decisionByHourReminder(data, minutes) {
     if (!data.requiresAeration) {
       return { code: "natural-monitoring", tone: "safe", label: "Monitoramento sem acionamento pela regra de biomassa", action: "Meça o oxigênio dissolvido; ligue a aeração em qualquer horário se o OD ficar abaixo de " + DO_TURN_ON + " mg/L." };
     }
-    if (minutes < 420) {
+    if (minutes >= 1380 || minutes < 360) {
       return { code: "critical-aeration", tone: "critical", label: "Período crítico: medir o OD", action: "Madrugada é o período de menor oxigênio. Sem medição de OD, manter a aeração ligada até o amanhecer; com medição, ligar se estiver abaixo de " + DO_TURN_ON + " mg/L." };
     }
-    if (minutes >= 1080) {
-      return { code: "scheduled-pause", tone: "neutral", label: "Início da noite: medir o OD", action: "Lembrete de monitoramento: meça o OD. Abaixo de " + DO_TURN_ON + " mg/L, ligar a aeração mesmo antes da meia-noite." };
+    if (minutes >= 900 && minutes < 1020) {
+      return { code: "preventive-mixing", tone: "attention", label: "Mistura preventiva da coluna d’água", action: "Lembrete: entre 15:00 e 17:00 a mistura reduz a estratificação. Informe o OD medido para uma decisão baseada na água." };
+    }
+    if (minutes >= 1080 && minutes < 1380) {
+      return { code: "scheduled-pause", tone: "neutral", label: "Início da noite: medir o OD", action: "Lembrete de monitoramento: meça o OD. Abaixo de " + DO_TURN_ON + " mg/L, ligar a aeração mesmo antes das 23:00." };
     }
     return { code: "day-monitoring", tone: "neutral", label: "Monitoramento diurno", action: "Informe o OD medido para decidir pela água; a próxima janela crítica começa à noite." };
   }
