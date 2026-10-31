@@ -25,7 +25,7 @@ const CACHE_PREFIX =
   "aquagestpro-";
 
 const CACHE_NAME =
-  "aquagestpro-producao-v25-tema-claro-relatorios";
+  "aquagestpro-producao-v26-importacao-contas";
 
 /*
   ============================================================

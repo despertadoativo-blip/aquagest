@@ -4817,16 +4817,43 @@
     var imported = 0;
     var tables = backup.tables;
 
+    /*
+      v26 — conta com o mesmo e-mail já existente no aparelho (índice único "email" de users).
+      Antes, o IndexedDB recusava a gravação no meio da importação ("Unable to add key to index 'email'").
+      Agora tudo é conferido ANTES de gravar:
+      - a conta existente ainda não tem piscicultura (ou já é a mesma): a piscicultura do backup é ligada
+        a essa conta, que mantém a própria senha; as referências ao usuário do backup passam para ela;
+      - a conta existente pertence a outra piscicultura: a importação é recusada sem gravar nada.
+    */
+    var userRemap = await resolveUserConflicts(tables.users || []);
+
+    Object.keys(tables).forEach(function (storeName) {
+      if (currentScope && window.AquaGestIsolation && typeof window.AquaGestIsolation.validateRecords === "function") {
+        window.AquaGestIsolation.validateRecords(storeName, tables[storeName], currentScope);
+      }
+    });
+
     for (var i = 0; i < Object.keys(tables).length; i += 1) {
       var storeName = Object.keys(tables)[i];
       var records = tables[storeName];
 
-      if (currentScope && window.AquaGestIsolation && typeof window.AquaGestIsolation.validateRecords === "function") {
-        window.AquaGestIsolation.validateRecords(storeName, records, currentScope);
-      }
-
       for (var j = 0; j < records.length; j += 1) {
-        await window.database.put(storeName, cloneJson(records[j]));
+        var record = remapUserReferences(cloneJson(records[j]), userRemap);
+
+        if (storeName === "users" && userRemap.byId[records[j].id]) {
+          var existing = userRemap.byId[records[j].id];
+          record = Object.assign({}, existing, {
+            propertyId: records[j].propertyId || existing.propertyId || null,
+            role: existing.role || records[j].role || "owner",
+            updatedAt: new Date().toISOString()
+          });
+        }
+
+        try {
+          await window.database.put(storeName, record);
+        } catch (error) {
+          throw new Error(friendlyImportError(error, storeName, imported));
+        }
         imported += 1;
       }
     }
@@ -4836,6 +4863,50 @@
       databaseVersion: Number(backup.databaseVersion),
       importedAt: new Date().toISOString()
     };
+  }
+
+  function normalizeEmail(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  async function resolveUserConflicts(backupUsers) {
+    var result = { byId: {}, idMap: {} };
+    if (!backupUsers.length) return result;
+    var existingUsers = await window.database.getAll("users");
+
+    backupUsers.forEach(function (backupUser) {
+      var email = normalizeEmail(backupUser.email);
+      if (!email) return;
+      var existing = existingUsers.find(function (user) {
+        return user && user.id !== backupUser.id && normalizeEmail(user.email) === email;
+      });
+      if (!existing) return;
+      if (existing.propertyId && existing.propertyId !== backupUser.propertyId) {
+        throw new Error("Já existe neste aparelho uma conta com o e-mail " + backupUser.email + " ligada a outra piscicultura. Nada foi importado. Para importar este backup, entre numa conta que ainda não tenha piscicultura cadastrada.");
+      }
+      result.byId[backupUser.id] = existing;
+      result.idMap[backupUser.id] = existing.id;
+    });
+    return result;
+  }
+
+  /* Troca, nos campos de primeiro nível, o id do usuário do backup pelo id da conta existente. */
+  function remapUserReferences(record, userRemap) {
+    var ids = userRemap.idMap;
+    if (!Object.keys(ids).length) return record;
+    Object.keys(record).forEach(function (key) {
+      if (key !== "id" && typeof record[key] === "string" && ids[record[key]]) record[key] = ids[record[key]];
+    });
+    return record;
+  }
+
+  function friendlyImportError(error, storeName, imported) {
+    var text = String(error && error.message || error || "");
+    var prefix = imported > 0 ? imported + " registros já tinham sido gravados. " : "Nada foi gravado. ";
+    if (/uniqueness|ConstraintError|unique/i.test(text)) {
+      return prefix + "A tabela " + storeName + " tem um registro que já existe neste aparelho com outro identificador (ex.: e-mail de conta repetido).";
+    }
+    return prefix + "Falha ao gravar a tabela " + storeName + ": " + text;
   }
 
   async function requestPersistentStorage() {
@@ -19477,7 +19548,7 @@
         recommendations,
         "normal",
         "Recomendação alimentar calculada",
-        "Forneça aproximadamente " + round(metrics.recommendedFeedDayKg, 3) + " kg/dia, ajustando conforme consumo, temperatura, oxigênio e resposta do lote."
+        "Forneça aproximadamente " + round(metrics.recommendedFeedDayKg, 2) + " kg/dia, ajustando conforme consumo, temperatura, oxigênio e resposta do lote."
       );
     }
 
@@ -19486,7 +19557,7 @@
         recommendations,
         "normal",
         "Divisão por trato",
-        "Com " + metrics.mealsPerDay + " tratos por dia, a recomendação é de aproximadamente " + round(metrics.recommendedFeedMealKg, 3) + " kg por trato."
+        "Com " + metrics.mealsPerDay + " tratos por dia, a recomendação é de aproximadamente " + round(metrics.recommendedFeedMealKg, 2) + " kg por trato."
       );
     }
 
@@ -21269,7 +21340,7 @@
   }
 
   function formatKgPrecise(value) {
-    return formatNumber(value, 3) + " kg";
+    return formatNumber(value, 2) + " kg";
   }
 
   function formatGram(value) {
@@ -23029,6 +23100,9 @@
     var temperature = Number(temperatureC) || 0;
 
     if (temperature <= 0) return 1.0;
+    /* v26: usa a tabela única do motor técnico (SENAR, 2019, Coleção 263); a tabela abaixo é só reserva. */
+    var engine = window.TechnicalEngine;
+    if (engine && typeof engine.feedingTemperatureFactor === "function") return engine.feedingTemperatureFactor(temperature);
 
     if (temperature < 22) return 0.55;
     if (temperature < 24) return 0.75;
@@ -23166,8 +23240,8 @@
     var feedMealKg = feedDayKg / mealsPerDay;
 
     setValueSilently("biometria_usedFeedingPercent", formatNumber(appliedPercent, 2));
-    setValueSilently("biometria_recommendedFeedDayKg", formatNumber(feedDayKg, 3));
-    setValueSilently("biometria_recommendedFeedMealKg", formatNumber(feedMealKg, 3));
+    setValueSilently("biometria_recommendedFeedDayKg", formatNumber(feedDayKg, 2));
+    setValueSilently("biometria_recommendedFeedMealKg", formatNumber(feedMealKg, 2));
   }
 
   function scheduleUpdate() {
@@ -24951,6 +25025,20 @@
       select.value =
         selectedCycleId;
 
+      return;
+    }
+
+    /* v26: com vários lotes, abre no lote mais recente (o mesmo do Painel) em vez de ficar sem seleção. */
+    var recent =
+      getDashboardLot();
+
+    if (recent) {
+      selectedCycleId =
+        getLotCycleId(
+          recent
+        );
+      select.value =
+        selectedCycleId;
       return;
     }
 
@@ -27819,7 +27907,7 @@
       var biomass = window.PredicaoService.projectBiomass(projectedWeight, value("prediction_population"));
       set("prediction_tgcResult", format(tgc, 4));
       set("prediction_weightResult", format(projectedWeight, 2) + " g");
-      set("prediction_biomassResult", format(biomass, 3) + " kg");
+      set("prediction_biomassResult", format(biomass, 2) + " kg");
       set("prediction_status", "Estimativa pelo TGC — valide com dados reais da propriedade.");
     } catch (error) {
       message(error.message || "Não foi possível calcular a previsão.", "warning");
@@ -27902,10 +27990,13 @@
     kgPerCvHigh: 493,
     source: "Sem aeração: 1.500–2.000 kg/ha (Boyd, 2022); padrão 1.500 kg/ha. Com aeração: cerca de 500 kg/ha a mais por hp, igual a 493 kg por CV (Boyd, 1997, citado pela Embrapa, Comunicado Técnico 54, 2016)."
   };
-  /* Limiares de OD para tilápia (mg/L). */
+  /*
+    Limiares de OD para tilápia (mg/L) — Queiroz e Boeira (Embrapa, CT 54, 2016):
+    abaixo de 2,0 = aeração de emergência; abaixo de 4,0 = ligar a aeração;
+    período crítico da meia-noite às 7 h. (v26: removida a faixa noturna 4–5 mg/L, sem fonte.)
+  */
   var DO_CRITICAL = 2;
   var DO_TURN_ON = 4;
-  var DO_COMFORT = 5;
 
   function number(value, fallback) {
     /* Leitor único: js/core/number-parser.js (AquaGestNumber). */
@@ -28013,24 +28104,18 @@
     if (od < DO_TURN_ON) {
       return { code: "do-turn-on", tone: night ? "critical" : "attention", label: "OD abaixo de " + DO_TURN_ON + " mg/L: ligar a aeração", action: "Ligar a aeração agora" + (data && data.aeratorsRecommended ? " (" + data.aeratorsRecommended + " aerador(es) de referência)" : "") + ", independentemente do horário, e medir o OD novamente em 1 hora." };
     }
-    if (od < DO_COMFORT && night) {
-      return { code: "do-watch-night", tone: "attention", label: "OD em queda no período noturno", action: "OD entre " + DO_TURN_ON + " e " + DO_COMFORT + " mg/L à noite tende a cair até o amanhecer. Medir de novo em 1 a 2 horas; ligar se ficar abaixo de " + DO_TURN_ON + " mg/L." };
-    }
-    return { code: "do-ok", tone: "safe", label: "OD adequado (" + round(od, 2) + " mg/L)", action: "Aeração não é necessária agora pelo OD medido. " + (night ? "Repetir a medição antes da madrugada (23:00–06:00)." : "Repetir a medição no fim da tarde e à noite.") };
+    return { code: "do-ok", tone: "safe", label: "OD adequado (" + round(od, 2) + " mg/L)", action: "Aeração não é necessária agora pelo OD medido. " + (night ? "Repetir a medição na madrugada (00:00–07:00), o período crítico." : "Repetir a medição no fim da tarde e à noite.") };
   }
 
   function decisionByHourReminder(data, minutes) {
     if (!data.requiresAeration) {
       return { code: "natural-monitoring", tone: "safe", label: "Monitoramento sem acionamento pela regra de biomassa", action: "Meça o oxigênio dissolvido; ligue a aeração em qualquer horário se o OD ficar abaixo de " + DO_TURN_ON + " mg/L." };
     }
-    if (minutes >= 1380 || minutes < 360) {
+    if (minutes < 420) {
       return { code: "critical-aeration", tone: "critical", label: "Período crítico: medir o OD", action: "Madrugada é o período de menor oxigênio. Sem medição de OD, manter a aeração ligada até o amanhecer; com medição, ligar se estiver abaixo de " + DO_TURN_ON + " mg/L." };
     }
-    if (minutes >= 900 && minutes < 1020) {
-      return { code: "preventive-mixing", tone: "attention", label: "Mistura preventiva da coluna d’água", action: "Lembrete: entre 15:00 e 17:00 a mistura reduz a estratificação. Informe o OD medido para uma decisão baseada na água." };
-    }
-    if (minutes >= 1080 && minutes < 1380) {
-      return { code: "scheduled-pause", tone: "neutral", label: "Início da noite: medir o OD", action: "Lembrete de monitoramento: meça o OD. Abaixo de " + DO_TURN_ON + " mg/L, ligar a aeração mesmo antes das 23:00." };
+    if (minutes >= 1080) {
+      return { code: "scheduled-pause", tone: "neutral", label: "Início da noite: medir o OD", action: "Lembrete de monitoramento: meça o OD. Abaixo de " + DO_TURN_ON + " mg/L, ligar a aeração mesmo antes da meia-noite." };
     }
     return { code: "day-monitoring", tone: "neutral", label: "Monitoramento diurno", action: "Informe o OD medido para decidir pela água; a próxima janela crítica começa à noite." };
   }
@@ -30347,12 +30432,7 @@
     }
 
     screen.innerHTML =
-      '<div class="page-header">' +
-        '<div>' +
-          '<h2>Água</h2>' +
-          '<p>Controle técnico da qualidade da água por viveiro.</p>' +
-        '</div>' +
-      '</div>' +
+      /* v26: título repetido removido; o cabeçalho da tela já mostra o nome e a descrição. */
 
       '<section class="page-card">' +
         '<div class="toolbar">' +
@@ -34537,12 +34617,7 @@
     }
 
     screen.innerHTML =
-      '<div class="page-header">' +
-        '<div>' +
-          '<h2>Arraçoamento</h2>' +
-          '<p>Registro técnico de alimentação com ajuste por biometria, qualidade da água, estoque global da Piscicultura e nutrição da tilápia.</p>' +
-        '</div>' +
-      '</div>' +
+      /* v26: título repetido removido; o cabeçalho da tela já mostra o nome e a descrição. */
 
       buildNutritionGuideHtml() +
 
@@ -35054,12 +35129,12 @@
 
         '<div class="pond-metric">' +
           '<strong>Saldo disponível</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.stockAvailableKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.stockAvailableKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
           '<strong>Baixa prevista</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.stockConsumptionKg || item.feedProvidedKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.stockConsumptionKg || item.feedProvidedKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
@@ -35124,12 +35199,12 @@
 
         '<div class="pond-metric">' +
           '<strong>Biomassa atual</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.currentBiomassKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.currentBiomassKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
           '<strong>Ração recomendada</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.recommendedFeedDayKg || 0, 3)) + ' kg/dia</span>' +
+          '<span>' + escapeHtml(formatNumber(item.recommendedFeedDayKg || 0, 2)) + ' kg/dia</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
@@ -35139,27 +35214,27 @@
 
         '<div class="pond-metric">' +
           '<strong>Ração ajustada</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.adjustedRecommendedFeedDayKg || 0, 3)) + ' kg/dia</span>' +
+          '<span>' + escapeHtml(formatNumber(item.adjustedRecommendedFeedDayKg || 0, 2)) + ' kg/dia</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
           '<strong>Ração por trato</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.recommendedFeedMealKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.recommendedFeedMealKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
           '<strong>Ração fornecida</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.feedProvidedKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.feedProvidedKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
           '<strong>Sobra/perda</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.feedWasteKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.feedWasteKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
           '<strong>Ração líquida técnica</strong>' +
-          '<span>' + escapeHtml(formatNumber(item.netFeedKg || 0, 3)) + ' kg</span>' +
+          '<span>' + escapeHtml(formatNumber(item.netFeedKg || 0, 2)) + ' kg</span>' +
         '</div>' +
 
         '<div class="pond-metric">' +
@@ -35179,10 +35254,10 @@
     var item = metrics || {};
     var currentLot = lot || getSelectedLot();
 
-    setValue("feeding_recommendedFeedDayKg", formatNumber(item.recommendedFeedDayKg || 0, 3));
+    setValue("feeding_recommendedFeedDayKg", formatNumber(item.recommendedFeedDayKg || 0, 2));
     setValue("feeding_waterFactor", formatNumber(item.waterFeedingFactor || 0, 2));
-    setValue("feeding_adjustedRecommendedFeedKg", formatNumber(item.adjustedRecommendedFeedDayKg || 0, 3));
-    setValue("feeding_recommendedFeedMealKg", formatNumber(item.recommendedFeedMealKg || 0, 3));
+    setValue("feeding_adjustedRecommendedFeedKg", formatNumber(item.adjustedRecommendedFeedDayKg || 0, 2));
+    setValue("feeding_recommendedFeedMealKg", formatNumber(item.recommendedFeedMealKg || 0, 2));
     setValue("feeding_technicalStatus", item.technicalStatus || "Aguardando dados");
 
     var previewList = getElement("feedingPreviewList");
@@ -35212,9 +35287,9 @@
           '<span>' +
             escapeHtml(item.inventoryItemName || "Nenhum item de estoque vinculado") +
             ' — saldo disponível: ' +
-            escapeHtml(formatNumber(item.stockAvailableKg || 0, 3)) +
+            escapeHtml(formatNumber(item.stockAvailableKg || 0, 2)) +
             ' kg — baixa prevista: ' +
-            escapeHtml(formatNumber(item.stockConsumptionKg || item.feedProvidedKg || 0, 3)) +
+            escapeHtml(formatNumber(item.stockConsumptionKg || item.feedProvidedKg || 0, 2)) +
             ' kg' +
           '</span>' +
         '</div>' +
@@ -35331,7 +35406,7 @@
 
   function describeInventoryOption(item) {
     var name = item.itemName || item.name || "Ração";
-    var stock = formatNumber(item.currentStock || 0, 3);
+    var stock = formatNumber(item.currentStock || 0, 2);
     var unit = item.unit || "kg";
     var protein = item.crudeProteinPercent || item.proteinPercent
       ? " — " + formatNumber(item.crudeProteinPercent || item.proteinPercent || 0, 1) + "% PB"
@@ -35546,7 +35621,7 @@
         '<div class="pond-card-info">' +
           '<strong>Baixa patrimonial prevista</strong>' +
           '<span>' +
-            escapeHtml(formatNumber(record.stockConsumptionKg || record.feedProvidedKg || 0, 3)) +
+            escapeHtml(formatNumber(record.stockConsumptionKg || record.feedProvidedKg || 0, 2)) +
             ' kg — origem: ' +
             escapeHtml(record.stockOriginPondName || record.pondName || "Viveiro") +
             ' / lote ' +
@@ -35610,7 +35685,7 @@
 
           '<div class="pond-metric">' +
             '<strong>Recomendada</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.recommendedFeedDayKg || 0, 3)) + ' kg/dia</span>' +
+            '<span>' + escapeHtml(formatNumber(record.recommendedFeedDayKg || 0, 2)) + ' kg/dia</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
@@ -35620,32 +35695,32 @@
 
           '<div class="pond-metric">' +
             '<strong>Ajustada</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.adjustedRecommendedFeedDayKg || 0, 3)) + ' kg/dia</span>' +
+            '<span>' + escapeHtml(formatNumber(record.adjustedRecommendedFeedDayKg || 0, 2)) + ' kg/dia</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Por trato</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.recommendedFeedMealKg || 0, 3)) + ' kg</span>' +
+            '<span>' + escapeHtml(formatNumber(record.recommendedFeedMealKg || 0, 2)) + ' kg</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Fornecida</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.feedProvidedKg || 0, 3)) + ' kg</span>' +
+            '<span>' + escapeHtml(formatNumber(record.feedProvidedKg || 0, 2)) + ' kg</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Baixa estoque</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.stockConsumptionKg || record.feedProvidedKg || 0, 3)) + ' kg</span>' +
+            '<span>' + escapeHtml(formatNumber(record.stockConsumptionKg || record.feedProvidedKg || 0, 2)) + ' kg</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Sobra/perda</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.feedWasteKg || 0, 3)) + ' kg</span>' +
+            '<span>' + escapeHtml(formatNumber(record.feedWasteKg || 0, 2)) + ' kg</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Líquida técnica</strong>' +
-            '<span>' + escapeHtml(formatNumber(record.netFeedKg || 0, 3)) + ' kg</span>' +
+            '<span>' + escapeHtml(formatNumber(record.netFeedKg || 0, 2)) + ' kg</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
@@ -38423,9 +38498,17 @@
   "use strict";
 
   /* CSV para Excel em português: separador ";" e vírgula decimal. */
-  function csvValue(value) {
+  /*
+    v26: peso e dinheiro sempre com 2 casas decimais (pedido do produtor).
+    A coluna é reconhecida pelo cabeçalho: (kg), (g), kg/dia, g/dia, (R$) ou "R$".
+  */
+  var TWO_DECIMAL_HEADER = /\((kg|g|R\$)\)|\b(kg|g)\/dia\b|R\$/i;
+  function isTwoDecimalHeader(header) { return TWO_DECIMAL_HEADER.test(String(header || "")); }
+  function round2(value) { return Math.round((value + Number.EPSILON) * 100) / 100; }
+
+  function csvValue(value, twoDecimals) {
     var text = typeof value === "number" && Number.isFinite(value)
-      ? String(value).replace(".", ",")
+      ? (twoDecimals ? round2(value).toFixed(2) : String(value)).replace(".", ",")
       : String(value === null || value === undefined ? "" : value);
     /* Aspas só quando necessário (separador, aspas ou quebra de linha). */
     return /[;"\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
@@ -38435,8 +38518,8 @@
     var list = Array.isArray(rows) ? rows : [];
     if (!list.length) return "";
     var keys = Object.keys(list[0]);
-    return [keys.map(csvValue).join(";")].concat(list.map(function (row) {
-      return keys.map(function (key) { return csvValue(row[key]); }).join(";");
+    return [keys.map(function (key) { return csvValue(key); }).join(";")].concat(list.map(function (row) {
+      return keys.map(function (key) { return csvValue(row[key], isTwoDecimalHeader(key)); }).join(";");
     })).join("\r\n");
   }
 
@@ -38576,6 +38659,7 @@
       '</sheetView></sheetViews><sheetFormatPr baseColWidth="8" defaultRowHeight="15"/><cols>' +
       widths.map(function (width, index) { return '<col min="' + (index + 1) + '" max="' + (index + 1) + '" width="' + width + '" customWidth="1"/>'; }).join("") +
       '</cols><sheetData>';
+    var headerRow = Array.isArray(list[0]) ? list[0] : [list[0]];
     list.forEach(function (row, rowIndex) {
       var values = Array.isArray(row) ? row : [row];
       var header = rowIndex === 0;
@@ -38593,7 +38677,8 @@
         }
         var numeric = numericCellValue(value);
         if (numeric !== null) {
-          xml += '<c r="' + ref + '" t="n"><v>' + numeric + "</v></c>";
+          if (isTwoDecimalHeader(headerRow[columnIndex])) xml += '<c r="' + ref + '" s="3" t="n"><v>' + round2(numeric) + "</v></c>";
+          else xml += '<c r="' + ref + '" t="n"><v>' + numeric + "</v></c>";
         } else {
           xml += '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
         }
@@ -38692,7 +38777,7 @@
       "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView visibility="visible" minimized="0" showHorizontalScroll="1" showVerticalScroll="1" showSheetTabs="1" activeTab="0"/></bookViews><sheets>' + list.map(function (sh) { return '<sheet name="' + xmlEscape(sh.name) + '" sheetId="' + sh.index + '" state="visible" r:id="rId' + sh.index + '"/>'; }).join("") + '</sheets><definedNames/><calcPr calcId="124519" fullCalcOnLoad="1"/></workbook>',
       "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + list.map(function (sh) { return '<Relationship Id="rId' + sh.index + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet' + sh.index + '.xml"/>'; }).join("") + '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdTheme" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>',
       "xl/theme/theme1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AquaGest Pro"><a:themeElements><a:clrScheme name="AquaGest"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="0B4F6C"/></a:accent1><a:accent2><a:srgbClr val="075E59"/></a:accent2><a:accent3><a:srgbClr val="2A9D8F"/></a:accent3><a:accent4><a:srgbClr val="7AA6C2"/></a:accent4><a:accent5><a:srgbClr val="8AB17D"/></a:accent5><a:accent6><a:srgbClr val="E9C46A"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="AquaGest"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="AquaGest"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>',
-      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><fonts count="2"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FFFFFFFF"/><sz val="11"/><scheme val="minor"/></font></fonts><fills count="3"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
+      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><fonts count="2"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FFFFFFFF"/><sz val="11"/><scheme val="minor"/></font></fonts><fills count="3"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
       "docProps/core.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEscape(title || "Relatório AquaGest Pro") + '</dc:title><dc:creator>AquaGest Pro</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00Z</dcterms:created></cp:coreProperties>',
       "docProps/app.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>AquaGest Pro</Application><AppVersion>1.0</AppVersion></Properties>'
     };
@@ -38731,7 +38816,12 @@
 
   /* CSV a partir de linhas em matriz ([[cabeçalho...], [valores...]]). */
   function matrixToCsv(rows) {
-    return (rows || []).map(function (row) { return (row || []).map(csvValue).join(";"); }).join("\r\n");
+    var header = (rows && rows[0]) || [];
+    return (rows || []).map(function (row, rowIndex) {
+      return (row || []).map(function (value, columnIndex) {
+        return csvValue(value, rowIndex > 0 && isTwoDecimalHeader(header[columnIndex]));
+      }).join(";");
+    }).join("\r\n");
   }
 
   function downloadMatrixCsv(filename, rows) {
@@ -43551,6 +43641,11 @@
     return phase ? normalizeText(value) : "Não informado";
   }
 
+  /* v26: peso (kg, g, t) com 2 casas decimais; outras unidades (L, mL, unidade) mantêm 3. */
+  function formatQuantity(value, unit) {
+    return formatNumber(value, /^(kg|g|t|ton|sc)$/i.test(String(unit || "").trim()) ? 2 : 3);
+  }
+
   function formatNumber(value, decimals) {
     var number = Number(value);
 
@@ -44205,7 +44300,7 @@
 
     setText("stockSummaryItems", formatNumber(item.activeItemCount || 0, 0));
     setText("stockSummaryValue", "R$ " + formatNumber(item.totalStockValue || 0, 2));
-    setText("stockSummaryFeed", formatNumber(item.feedStockKg || 0, 3) + " kg");
+    setText("stockSummaryFeed", formatNumber(item.feedStockKg || 0, 2) + " kg");
     setText("stockSummaryAlerts", formatNumber((item.criticalCount || 0) + (item.warningCount || 0), 0));
   }
 
@@ -44231,7 +44326,7 @@
       option.textContent =
         (item.itemName || item.name || "Item") +
         " — saldo " +
-        formatNumber(item.currentStock || 0, 3) +
+        formatQuantity(item.currentStock || 0, item.unit) +
         " " +
         (item.unit || "");
 
@@ -44321,12 +44416,12 @@
         '<div class="pond-metrics-grid">' +
           '<div class="pond-metric">' +
             '<strong>Saldo global</strong>' +
-            '<span>' + escapeHtml(formatNumber(item.currentStock || 0, 3)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(item.currentStock || 0, item.unit)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Estoque mínimo</strong>' +
-            '<span>' + escapeHtml(formatNumber(item.minimumStock || 0, 3)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(item.minimumStock || 0, item.unit)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
@@ -44444,17 +44539,17 @@
         '<div class="pond-metrics-grid">' +
           '<div class="pond-metric">' +
             '<strong>Quantidade</strong>' +
-            '<span>' + escapeHtml(formatNumber(movement.quantity || 0, 3)) + ' ' + escapeHtml(movement.unit || "") + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(movement.quantity || 0, movement.unit)) + ' ' + escapeHtml(movement.unit || "") + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Saldo anterior</strong>' +
-            '<span>' + escapeHtml(formatNumber(movement.previousStock || 0, 3)) + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(movement.previousStock || 0, movement.unit)) + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Novo saldo global</strong>' +
-            '<span>' + escapeHtml(formatNumber(movement.newStock || 0, 3)) + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(movement.newStock || 0, movement.unit)) + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
@@ -44572,17 +44667,17 @@
         '<div class="pond-metrics-grid">' +
           '<div class="pond-metric">' +
             '<strong>Saldo anterior</strong>' +
-            '<span>' + escapeHtml(formatNumber(result.previousStock || 0, 3)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(result.previousStock || 0, item.unit)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Quantidade</strong>' +
-            '<span>' + escapeHtml(formatNumber(result.quantity || 0, 3)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(result.quantity || 0, item.unit)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
             '<strong>Novo saldo global</strong>' +
-            '<span>' + escapeHtml(formatNumber(result.newStock || 0, 3)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
+            '<span>' + escapeHtml(formatQuantity(result.newStock || 0, item.unit)) + ' ' + escapeHtml(item.unit || "") + '</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
@@ -47940,7 +48035,7 @@ function getIncomeCategoryOptionsHtml() {
     setText("financeSummaryReceivable", formatCurrency((financial.pendingReceivable || 0) + (financial.overdueReceivable || 0)));
     setText("financeSummaryPayable", formatCurrency((financial.pendingPayable || 0) + (financial.overduePayable || 0)));
     setText("financeSummaryFeedCost", formatCurrency(productive.feedCost || 0));
-    setText("financeSummaryFeedKg", formatNumber(productive.feedConsumptionKg || 0, 3) + " kg");
+    setText("financeSummaryFeedKg", formatNumber(productive.feedConsumptionKg || 0, 2) + " kg");
   }
 
   function populateAccountSelects() {
@@ -48194,7 +48289,7 @@ function getIncomeCategoryOptionsHtml() {
         '<div class="pond-metrics-grid">' +
           '<div class="pond-metric">' +
             '<strong>Ração consumida</strong>' +
-            '<span>' + escapeHtml(formatNumber(item.feedConsumptionKg || 0, 3)) + ' kg</span>' +
+            '<span>' + escapeHtml(formatNumber(item.feedConsumptionKg || 0, 2)) + ' kg</span>' +
           '</div>' +
           '<div class="pond-metric">' +
             '<strong>Custo alimentar</strong>' +
@@ -49946,8 +50041,12 @@ function getIncomeCategoryOptionsHtml() {
     var out = [], cycles = (d.cycles || []).filter(function (c) { return CLOSED.indexOf(String(c.status || "").toLowerCase()) < 0; });
     cycles.forEach(function (c) {
       var name = c.name || c.code || "Lote";
-      var last = (d.biometries || []).filter(function (b) { return b.cycleId === c.id; }).reduce(function (m, b) { return Math.max(m, ts(b.date)); }, 0);
-      if (!last || now - last > 14 * DAY) out.push({ level: "warn", text: name + ": biometria atrasada (mais de 14 dias)." });
+      /* SENAR (2018, Coleção 208, p. 72): biometria quinzenal no início; mensal a partir de 200 g. */
+      var lastBio = (d.biometries || []).filter(function (b) { return b.cycleId === c.id; }).reduce(function (m, b) { return !m || ts(b.date) > ts(m.date) ? b : m; }, null);
+      var last = lastBio ? ts(lastBio.date) : 0;
+      var weightG = num(lastBio && lastBio.averageWeightG ? lastBio.averageWeightG : c.currentAverageWeightG || c.initialAverageWeightG);
+      var limitDays = weightG >= 200 ? 30 : 15;
+      if (!last || now - last > limitDays * DAY) out.push({ level: "warn", text: name + ": biometria atrasada (mais de " + limitDays + " dias" + (weightG >= 200 ? ", peixes acima de 200 g" : "") + ")." });
       var wq = (d.water || []).filter(function (w) { return w.cycleId === c.id; }).sort(function (a, b) { return ts(b.date) - ts(a.date); })[0];
       if (wq && wq.dissolvedOxygenMgL != null && wq.dissolvedOxygenMgL !== "" && num(wq.dissolvedOxygenMgL) < 4) out.push({ level: "danger", text: name + ": oxigênio dissolvido baixo (" + num(wq.dissolvedOxygenMgL) + " mg/L). Ligue os aeradores." });
     });
@@ -50302,6 +50401,11 @@ function getIncomeCategoryOptionsHtml() {
     biometria: {
       title: "Biometria",
       subtitle: "Peso médio, biomassa e desempenho produtivo"
+    },
+
+    desempenho: {
+      title: "Desempenho",
+      subtitle: "Evolução técnica dos lotes: peso, biomassa, GPD e conversão alimentar"
     },
 
     previsoes: {
