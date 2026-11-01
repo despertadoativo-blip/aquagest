@@ -4626,6 +4626,8 @@
   function brDate(v) { var p = text(v).slice(0, 10).split("-"); return p.length === 3 && p[0].length === 4 ? p[2] + "/" + p[1] + "/" + p[0] : ""; }
   function build(c) {
     if (c.name || c.code) return text(c.name || c.code);
+    /* v26.7: com o nº do lote da cooperativa, nome curto: "V01 · Lote 377 · 02/03/2026". */
+    if (text(c.cooperativeLotNumber)) return [c.pondName || "Viveiro", "Lote " + text(c.cooperativeLotNumber), brDate(c.startDate || c.stockingDate)].filter(Boolean).join(" · ");
     var base = (c.pondName || "Viveiro") + (c.species ? " — " + c.species + (c.category ? " / " + c.category : "") : "");
     var start = brDate(c.startDate || c.stockingDate);
     return base + (start ? " (povoado em " + start + ")" : "");
@@ -18077,12 +18079,13 @@
     card.setAttribute("data-prod-tab", "mov");
     card.innerHTML =
       "<h3>Movimentação de peixes</h3>" +
-      "<p class='technical-note'>Registre despesca parcial, transferências e mortalidade fora da biometria. A população, a sobrevivência e a conversão alimentar do lote são recalculadas automaticamente.</p>" +
+      "<p class='technical-note'>Registre despesca parcial e transferências. A mortalidade é lançada por dia no Arraçoamento (ou em Sanidade, quando ligada a uma ocorrência) e a biometria soma sozinha. A população, a sobrevivência e a conversão alimentar do lote são recalculadas automaticamente.</p>" +
       "<form id='mov_form' class='form'><div class='form-grid'>" +
       "<div class='form-group'><label for='mov_cycleId'>Lote</label><select id='mov_cycleId' required></select></div>" +
       "<div class='form-group'><label for='mov_date'>Data</label><input id='mov_date' type='date' required></div>" +
       "<div class='form-group'><label for='mov_type'>Tipo</label><select id='mov_type'>" +
-      Object.keys(types).map(function (k) { return "<option value='" + k + "'>" + esc(types[k].label) + "</option>"; }).join("") +
+      /* v26.6: mortalidade num lugar só (Arraçoamento); lançamentos antigos de mortalidade continuam valendo. */
+      Object.keys(types).filter(function (k) { return k !== "mortalidade"; }).map(function (k) { return "<option value='" + k + "'>" + esc(types[k].label) + "</option>"; }).join("") +
       "</select></div>" +
       "<div class='form-group'><label for='mov_quantity'>Quantidade de peixes</label><input id='mov_quantity' type='text' inputmode='numeric' required></div>" +
       "<div class='form-group'><label for='mov_weight'>Peso médio (g)</label><input id='mov_weight' type='text' inputmode='decimal' placeholder='Necessário para despesca e transferência'></div>" +
@@ -19786,7 +19789,8 @@
     }
 
     var previousPopulation = toInteger(previousState.population || baseState.population || 0);
-    var mortality = input.mortality;
+    var mortalityFromFeeding = toNumber(ctx.automaticMortalityRecords) > 0;
+    var mortality = mortalityFromFeeding ? toInteger(ctx.automaticMortality) : input.mortality;
 
     if (mortality > previousPopulation && previousPopulation > 0) {
       mortality = previousPopulation;
@@ -19926,6 +19930,7 @@
       previousBiomassKg: round(previousBiomassKg, 2),
 
       mortality: mortality,
+      mortalityFromFeeding: mortalityFromFeeding,
       movementDeathsPeriod: periodMovements.deaths,
       movementOutPeriod: periodMovements.totalOut,
       movementInPeriod: periodMovements.transferredIn,
@@ -20487,6 +20492,33 @@
     return previousState;
   }
 
+  /*
+    v26.6 — mortalidade num lugar só: o produtor lança a morte do dia no Arraçoamento
+    (como na ficha diária da Copacol) e a biometria soma sozinha o período
+    (depois da biometria anterior até a data desta). Sem lançamento diário no período,
+    vale o número digitado na biometria (registros antigos continuam iguais).
+  */
+  function sumFeedingMortality(feedingRecords, cycle, fromDate, toDate) {
+    var result = { total: 0, count: 0 };
+    (feedingRecords || []).forEach(function (record) {
+      var status = normalizeSearch(record && record.status);
+      if (
+        record &&
+        record.propertyId === cycle.propertyId &&
+        (record.cycleId === cycle.id || record.productionCycleId === cycle.id) &&
+        record.deleted !== true &&
+        status !== "voided" &&
+        status !== "cancelado" &&
+        (!fromDate || compareDates(record.date, fromDate) > 0) &&
+        (!toDate || compareDates(record.date, toDate) <= 0)
+      ) {
+        result.count += 1;
+        result.total += Math.max(0, Math.round(toNumber(record.mortalityCount)));
+      }
+    });
+    return result;
+  }
+
   async function getBiometryContext(cycleId, options) {
     ensureDependencies();
 
@@ -20542,6 +20574,8 @@
         return total + toNumber(value);
       }, 0);
 
+    var feedingMortality = targetDate ? sumFeedingMortality(feedingRecords, entry.cycle, previousDate, targetDate) : { total: 0, count: 0 };
+
     return {
       cycle: entry.cycle,
       stocking: entry.stocking || null,
@@ -20551,7 +20585,9 @@
       previousState: previousState,
       history: history,
       movements: await loadFishMovements(entry.cycle.id),
-      automaticFeedPeriodKg: round(automaticFeedPeriodKg, 2)
+      automaticFeedPeriodKg: round(automaticFeedPeriodKg, 2),
+      automaticMortality: feedingMortality.total,
+      automaticMortalityRecords: feedingMortality.count
     };
   }
 
@@ -20926,6 +20962,7 @@
     var history = await listBiometriesByCycle(entry.cycle.id);
     var state = Object.assign({}, baseState);
     var movements = await loadFishMovements(entry.cycle.id);
+    var allFeedingRecords = await dbGetAll("feeding_records");
     var updatedRecords = [];
 
     for (var i = 0; i < history.length; i += 1) {
@@ -20936,6 +20973,7 @@
         activeLotId: entry.cycle.id
       }));
 
+      var rebuildMortality = sumFeedingMortality(allFeedingRecords, entry.cycle, state.date || baseState.date || "", record.date);
       var context = {
         cycle: entry.cycle,
         stocking: entry.stocking || null,
@@ -20944,7 +20982,9 @@
         previousState: state,
         currentState: state,
         history: history,
-        movements: movements
+        movements: movements,
+        automaticMortality: rebuildMortality.total,
+        automaticMortalityRecords: rebuildMortality.count
       };
 
       var metrics = calculateBiometryMetrics(input, context);
@@ -22307,6 +22347,26 @@
       "biometria_feedTotalKg",
       item.feedTotalKg > 0 ? formatKg(item.feedTotalKg) : "Será calculado ao salvar"
     );
+
+    /* v26.6: com mortalidade lançada no Arraçoamento, a biometria usa a soma do período (sem digitar de novo). */
+    var mortalityInput = getElement("biometria_mortality");
+    if (mortalityInput) {
+      var hint = getElement("biometria_mortalityHint");
+      if (!hint && mortalityInput.parentNode) {
+        hint = document.createElement("small");
+        hint.id = "biometria_mortalityHint";
+        hint.className = "technical-note";
+        mortalityInput.parentNode.appendChild(hint);
+      }
+      if (item.mortalityFromFeeding) {
+        mortalityInput.value = item.mortality || 0;
+        mortalityInput.readOnly = true;
+        if (hint) hint.textContent = "Soma da mortalidade lançada no Arraçoamento desde a biometria anterior.";
+      } else {
+        mortalityInput.readOnly = false;
+        if (hint) hint.textContent = "Lance a mortalidade do dia no Arraçoamento; a biometria soma sozinha. Sem lançamento diário, digite o total do período.";
+      }
+    }
 
     var feedPeriodInput = getElement("biometria_feedPeriodKg");
     if (feedPeriodInput && !feedPeriodTouched) {
@@ -38898,7 +38958,7 @@
   function createXlsxWorkbook(sheets, title) {
     var list = (Array.isArray(sheets) && sheets.length ? sheets : [{ name: title || "Relatório", rows: [[""]] }]).map(function (sheet, index) {
       var raw = cleanText(sheet.name || ("Aba " + (index + 1))).replace(/[\\/*?:\[\]]/g, " ");
-      return { name: (raw || ("Aba " + (index + 1))).slice(0, 31), rows: sheet.rows };
+      return { name: (raw || ("Aba " + (index + 1))).slice(0, 31), rows: sheet.rows, ficha: sheet.ficha || null };
     });
     var used = {};
     list.forEach(function (sheet, index) {
@@ -38914,11 +38974,11 @@
       "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><workbookPr/><bookViews><workbookView visibility="visible" minimized="0" showHorizontalScroll="1" showVerticalScroll="1" showSheetTabs="1" activeTab="0"/></bookViews><sheets>' + list.map(function (sh) { return '<sheet name="' + xmlEscape(sh.name) + '" sheetId="' + sh.index + '" state="visible" r:id="rId' + sh.index + '"/>'; }).join("") + '</sheets><definedNames/><calcPr calcId="124519" fullCalcOnLoad="1"/></workbook>',
       "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + list.map(function (sh) { return '<Relationship Id="rId' + sh.index + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet' + sh.index + '.xml"/>'; }).join("") + '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdTheme" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/></Relationships>',
       "xl/theme/theme1.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="AquaGest Pro"><a:themeElements><a:clrScheme name="AquaGest"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F497D"/></a:dk2><a:lt2><a:srgbClr val="EEECE1"/></a:lt2><a:accent1><a:srgbClr val="0B4F6C"/></a:accent1><a:accent2><a:srgbClr val="075E59"/></a:accent2><a:accent3><a:srgbClr val="2A9D8F"/></a:accent3><a:accent4><a:srgbClr val="7AA6C2"/></a:accent4><a:accent5><a:srgbClr val="8AB17D"/></a:accent5><a:accent6><a:srgbClr val="E9C46A"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme><a:fontScheme name="AquaGest"><a:majorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme><a:fmtScheme name="AquaGest"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="25400" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln><a:ln w="38100" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:prstDash val="solid"/></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements><a:objectDefaults/><a:extraClrSchemeLst/></a:theme>',
-      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><fonts count="2"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FFFFFFFF"/><sz val="11"/><scheme val="minor"/></font></fonts><fills count="3"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
+      "xl/styles.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="3"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/><numFmt numFmtId="165" formatCode="#,##0.000"/><numFmt numFmtId="166" formatCode="0.0"/></numFmts><fonts count="5"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FFFFFFFF"/><sz val="11"/><scheme val="minor"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FF17321F"/><sz val="9"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FF2F6B44"/><sz val="8"/></font><font><b/><name val="Calibri"/><family val="2"/><color rgb="FF17321F"/><sz val="15"/></font></fonts><fills count="5"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDCEFE1"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF2F6B44"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FF2F6B44"/></left><right style="thin"><color rgb="FF2F6B44"/></right><top style="thin"><color rgb="FF2F6B44"/></top><bottom style="thin"><color rgb="FF2F6B44"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="14"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"><alignment vertical="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="3" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf><xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles><tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleLight16"/></styleSheet>',
       "docProps/core.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEscape(title || "Relatório AquaGest Pro") + '</dc:title><dc:creator>AquaGest Pro</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00Z</dcterms:created></cp:coreProperties>',
       "docProps/app.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>AquaGest Pro</Application><AppVersion>1.0</AppVersion></Properties>'
     };
-    list.forEach(function (sh) { files["xl/worksheets/sheet" + sh.index + ".xml"] = worksheetXml(sh.rows); });
+    list.forEach(function (sh) { files["xl/worksheets/sheet" + sh.index + ".xml"] = sh.ficha ? fichaWorksheetXml(sh.ficha) : worksheetXml(sh.rows); });
     return createZip(files);
   }
 
@@ -39412,6 +39472,245 @@
     return concatenate(parts);
   }
 
+  /*
+    v26.7 — fichas das cooperativas com cara de papel (opção B aprovada pelo produtor):
+    folha verde-clara, grade verde-escura, faixas de grupo, valores em fonte de máquina de escrever (Courier).
+    doc = { model, farm, code, city, owner, generatedAt, sections: [{ title, fields: [[rótulo, valor]], groups: [[rótulo, colunas]], head: [], rows: [[texto]], note }] }
+  */
+  function createFichaPdf(doc) {
+    var W = 842, H = 595, M = 30, CW = W - 2 * M, BOTTOM = 46;
+    var C = { page: "F3FAF4", dark: "2F6B44", head: "DCEFE1", zebra: "F6FBF7", white: "FFFFFF", ink: "13233F", label: "2F6B44", text: "17321F", muted: "3D5C46" };
+    var pages = [], page = null, y = 0;
+    function raw(t) { page.push(asciiBytes(t)); }
+    /* ² e ³ desenhados como expoente (o glifo pode faltar na fonte do leitor de PDF); "−" vira "-". */
+    function text(x, yy, value, size, font, color) {
+      var f = "/" + font + " ";
+      raw("BT\n" + pdfColor(color || C.text) + f + size + " Tf\n" + x.toFixed(2) + " " + yy.toFixed(2) + " Td\n");
+      String(value === null || value === undefined ? "" : value).replace(/\u2212/g, "-").split(/([\u00b2\u00b3])/).forEach(function (segment) {
+        if (!segment) return;
+        if (segment === "\u00b2" || segment === "\u00b3") {
+          raw(f + (size * 0.62).toFixed(2) + " Tf " + (size * 0.38).toFixed(2) + " Ts\n");
+          page.push(pdfLiteralBytes(segment === "\u00b2" ? "2" : "3"));
+          raw(" Tj\n0 Ts " + f + size + " Tf\n");
+          return;
+        }
+        page.push(pdfLiteralBytes(segment)); raw(" Tj\n");
+      });
+      raw("ET\n");
+    }
+    function rect(x, yy, w, h, fill, stroke, lw) {
+      if (fill) raw(pdfColor(fill) + x.toFixed(2) + " " + yy.toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re f\n");
+      if (stroke) raw((lw || 0.8) + " w\n" + pdfColor(stroke, true) + x.toFixed(2) + " " + yy.toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re S\n");
+    }
+    function courierWidth(t, size) { return String(t || "").length * 0.6 * size; }
+    function fitCourier(t, size, width) { var s = String(t || ""); while (s.length > 1 && courierWidth(s, size) > width) s = s.slice(0, -1); return s; }
+    function newPage(title) {
+      page = []; pages.push({ parts: page, title: title });
+      rect(0, 0, W, H, C.page);
+      /* topo: selo AquaGest, título centralizado, modelo e data */
+      rect(M, H - 52, 104, 24, null, C.dark, 1.6);
+      text(M + 9, H - 44, "AquaGest Pro", 11, "F2", C.dark);
+      /* título centralizado entre o selo e a data; título longo vai em duas linhas (principal + complemento entre parênteses) */
+      var room = W - 2 * (M + 150), main = title, extra = "";
+      if (pdfTextWidth(title, 15, true) > room && title.indexOf(" (") > 0) { main = title.slice(0, title.indexOf(" (")); extra = title.slice(title.indexOf(" (") + 1); }
+      var ts = 15; while (ts > 10 && pdfTextWidth(main, ts, true) > room) ts -= 0.5;
+      if (extra) {
+        text((W - pdfTextWidth(main, ts, true)) / 2, H - 39, main, ts, "F2", C.text);
+        var es = 8.5; while (es > 6 && pdfTextWidth(extra, es, true) > room) es -= 0.5;
+        text((W - pdfTextWidth(extra, es, true)) / 2, H - 51, extra, es, "F2", C.muted);
+      } else {
+        text((W - pdfTextWidth(main, ts, true)) / 2, H - 45, main, ts, "F2", C.text);
+      }
+      var r1 = "Modelo " + doc.model, r2 = doc.generatedAt || "";
+      text(W - M - pdfTextWidth(r1, 7.5, false), H - 38, r1, 7.5, "F1", C.muted);
+      text(W - M - pdfTextWidth(r2, 7.5, false), H - 48, r2, 7.5, "F1", C.muted);
+      y = H - 62;
+    }
+    function fieldsBox(fields) {
+      var perRow = 6, cellH = 28, cw = CW / perRow;
+      for (var i = 0; i < fields.length; i += perRow) {
+        var row = fields.slice(i, i + perRow);
+        var x = M;
+        row.forEach(function (f, k) {
+          var w = (k === row.length - 1) ? M + CW - x : cw;
+          rect(x, y - cellH, w, cellH, C.white, C.dark, 1);
+          text(x + 5, y - 9, String(f[0]).toUpperCase().replace(/M\u00b2/g, "m\u00b2"), 5.8, "F2", C.label);
+          /* valor longo diminui a letra para caber inteiro (mínimo 6,5) antes de cortar */
+          var size = 10, value = String(f[1] === null || f[1] === undefined ? "" : f[1]);
+          while (size > 6.5 && courierWidth(value, size) > w - 10) size -= 0.5;
+          text(x + 5, y - 22, fitCourier(value, size, w - 10), size, "F4", C.ink);
+          x += w;
+        });
+        y -= cellH;
+      }
+      y -= 10;
+    }
+    function table(section) {
+      var head = section.head, rows = section.rows, n = head.length;
+      var natural = head.map(function (h, c) {
+        var widest = 0;
+        rows.forEach(function (r) { widest = Math.max(widest, courierWidth(r[c], 8)); });
+        return Math.max(widest + 10, Math.min(pdfTextWidth(h, 6.6, true), 62) + 8, 34);
+      });
+      var sum = natural.reduce(function (a, b) { return a + b; }, 0);
+      var widths = natural.map(function (w) { return w * CW / sum; });
+      var headLines = head.map(function (h, i) { return pdfWrap(h, 6.6, true, widths[i] - 6); });
+      var headH = 6 + headLines.reduce(function (m, l) { return Math.max(m, l.length); }, 1) * 8;
+      function drawHeader() {
+        if (section.groups && section.groups.length) {
+          var gx = M;
+          section.groups.forEach(function (g, gi) {
+            var span = 0; for (var s = 0; s < g[1]; s += 1) span += widths[groupStart(gi) + s];
+            rect(gx, y - 14, span, 14, C.dark);
+            if (gi > 0) raw("2 w\n" + pdfColor(C.page, true) + gx.toFixed(2) + " " + (y - 14).toFixed(2) + " m " + gx.toFixed(2) + " " + y.toFixed(2) + " l S\n");
+            if (g[0]) { var lw = pdfTextWidth(g[0], 7.2, true); text(gx + (span - lw) / 2, y - 10, g[0], 7.2, "F2", C.white); }
+            gx += span;
+          });
+          y -= 14;
+        }
+        var x = M;
+        head.forEach(function (h, i) {
+          rect(x, y - headH, widths[i], headH, C.head, C.dark, 0.8);
+          headLines[i].forEach(function (lineText, k) { var lw = pdfTextWidth(lineText, 6.6, true); text(x + (widths[i] - lw) / 2, y - 8 - k * 8, lineText, 6.6, "F2", C.text); });
+          x += widths[i];
+        });
+        y -= headH;
+      }
+      function groupStart(gi) { var s = 0; for (var k = 0; k < gi; k += 1) s += section.groups[k][1]; return s; }
+      drawHeader();
+      rows.forEach(function (r, ri) {
+        if (y - 14 < BOTTOM) { newPage(section.title); drawHeader(); }
+        var x = M;
+        r.forEach(function (v, i) {
+          rect(x, y - 14, widths[i], 14, ri % 2 ? C.zebra : C.white, C.dark, 0.6);
+          var value = fitCourier(v, 8, widths[i] - 6);
+          var tx = i === 0 ? x + (widths[i] - courierWidth(value, 8)) / 2 : x + widths[i] - 4 - courierWidth(value, 8);
+          text(tx, y - 10, value, 8, "F3", C.ink);
+          x += widths[i];
+        });
+        y -= 14;
+      });
+      if (!rows.length) { rect(M, y - 16, CW, 16, C.white, C.dark, 0.6); text(M + 6, y - 11, "Sem registros.", 8, "F1", C.muted); y -= 16; }
+      if (section.note) {
+        y -= 4;
+        pdfWrap(section.note, 6.8, false, CW).forEach(function (l) { if (y - 9 < BOTTOM) return; text(M, y - 8, l, 6.8, "F1", C.muted); y -= 9; });
+      }
+    }
+    (doc.sections || []).forEach(function (section) {
+      newPage(section.title);
+      fieldsBox(section.fields.concat([["Piscicultura · Código · Município", [doc.farm, doc.code, doc.city].filter(Boolean).join(" · ")]]));
+      table(section);
+    });
+    var total = pages.length;
+    var streams = pages.map(function (p, index) {
+      page = p.parts;
+      raw("0.6 w\n" + pdfColor("9CC5A8", true) + M + " 34 m " + (W - M) + " 34 l S\n");
+      text(M, 24, "Responsável: " + (doc.owner || "Não informado") + " · Valores calculados a partir dos registros do produtor no AquaGest Pro.", 6.8, "F1", C.muted);
+      var right = "Página " + (index + 1) + " de " + total;
+      text(W - M - pdfTextWidth(right, 6.8, false), 24, right, 6.8, "F1", C.muted);
+      return concatenate(page);
+    });
+    var objects = [];
+    var f1 = 3 + total * 2, f2 = f1 + 1, f3 = f1 + 2, f4 = f1 + 3, infoObj = f1 + 4;
+    objects[1] = asciiBytes("<< /Type /Catalog /Pages 2 0 R >>");
+    var kids = [];
+    streams.forEach(function (content, index) {
+      var po = 3 + index * 2;
+      kids.push(po + " 0 R");
+      objects[po] = asciiBytes("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " + W + " " + H + "] /Resources << /Font << /F1 " + f1 + " 0 R /F2 " + f2 + " 0 R /F3 " + f3 + " 0 R /F4 " + f4 + " 0 R >> >> /Contents " + (po + 1) + " 0 R >>");
+      objects[po + 1] = concatenate([asciiBytes("<< /Length " + content.length + " >>\nstream\n"), content, asciiBytes("\nendstream")]);
+    });
+    objects[2] = asciiBytes("<< /Type /Pages /Kids [" + kids.join(" ") + "] /Count " + total + " >>");
+    objects[f1] = asciiBytes("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+    objects[f2] = asciiBytes("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+    objects[f3] = asciiBytes("<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>");
+    objects[f4] = asciiBytes("<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>");
+    objects[infoObj] = concatenate([asciiBytes("<< /Title "), pdfLiteralBytes("Ficha " + doc.model + (doc.farm ? " — " + doc.farm : "")), asciiBytes(" /Producer (AquaGest Pro) >>")]);
+    var parts = [new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a])];
+    var position = parts[0].length, offsets = [0];
+    for (var n = 1; n <= infoObj; n += 1) {
+      var bodyBytes = objects[n] || asciiBytes("null");
+      var prefix = asciiBytes(n + " 0 obj\n"), suffix = asciiBytes("\nendobj\n");
+      offsets[n] = position; parts.push(prefix, bodyBytes, suffix);
+      position += prefix.length + bodyBytes.length + suffix.length;
+    }
+    var xref = "xref\n0 " + (infoObj + 1) + "\n0000000000 65535 f \n";
+    for (var k = 1; k <= infoObj; k += 1) xref += paddedOffset(offsets[k]) + " 00000 n \n";
+    xref += "trailer\n<< /Size " + (infoObj + 1) + " /Root 1 0 R /Info " + infoObj + " 0 R >>\nstartxref\n" + position + "\n%%EOF\n";
+    parts.push(asciiBytes(xref));
+    return concatenate(parts);
+  }
+
+  function downloadFichaPdf(filename, doc) {
+    downloadBytes(String(filename || "ficha.pdf").replace(/\.pdf$/i, "") + ".pdf", createFichaPdf(doc), "application/pdf");
+  }
+
+  /*
+    Excel da ficha: mesma grade com bordas, faixas de grupo mescladas e cabeçalho em caixas.
+    Estilos (styles.xml): 4 texto com borda · 5 #,##0.00 · 6 #,##0 · 7 cabeçalho · 8 faixa de grupo · 9 título · 10 rótulo · 11 data · 12 0,000 · 13 0,0
+  */
+  function fichaWorksheetXml(ficha) {
+    var n = Math.max(6, ficha.head.length);
+    var rows = [], merges = [];
+    function cell(ref, style, value) {
+      if (value === "" || value === null || value === undefined) return '<c r="' + ref + '" s="' + style + '"/>';
+      if (typeof value === "number") return '<c r="' + ref + '" s="' + style + '" t="n"><v>' + value + "</v></c>";
+      var serial = style === 11 ? excelDateSerial(value) : null;
+      if (serial !== null) return '<c r="' + ref + '" s="11"><v>' + serial + "</v></c>";
+      return '<c r="' + ref + '" s="' + style + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEscape(value) + "</t></is></c>";
+    }
+    var r = 1;
+    rows.push('<row r="1" ht="24" customHeight="1">' + cell("A1", 9, ficha.title) + "</row>");
+    merges.push("A1:" + columnName(n - 1) + "1");
+    r = 2;
+    rows.push('<row r="2">' + cell("A2", 0, ficha.identity || "") + "</row>");
+    merges.push("A2:" + columnName(n - 1) + "2");
+    r = 4;
+    var perRow = 6, span = Math.max(1, Math.floor(n / perRow));
+    for (var i = 0; i < ficha.fields.length; i += perRow) {
+      var group = ficha.fields.slice(i, i + perRow), labels = "", values = "";
+      group.forEach(function (f, k) {
+        var c0 = k * span, c1 = (k === group.length - 1) ? n - 1 : c0 + span - 1;
+        labels += cell(columnName(c0) + r, 10, String(f[0]).toUpperCase().replace(/M\u00b2/g, "m\u00b2"));
+        values += cell(columnName(c0) + (r + 1), 4, String(f[1]));
+        for (var c = c0 + 1; c <= c1; c += 1) { labels += cell(columnName(c) + r, 10, ""); values += cell(columnName(c) + (r + 1), 4, ""); }
+        if (c1 > c0) { merges.push(columnName(c0) + r + ":" + columnName(c1) + r); merges.push(columnName(c0) + (r + 1) + ":" + columnName(c1) + (r + 1)); }
+      });
+      rows.push('<row r="' + r + '">' + labels + "</row>", '<row r="' + (r + 1) + '">' + values + "</row>");
+      r += 2;
+    }
+    r += 1;
+    if (ficha.groups && ficha.groups.length) {
+      var gx = 0, gcells = "";
+      ficha.groups.forEach(function (g) {
+        gcells += cell(columnName(gx) + r, 8, g[0] || "");
+        for (var c = gx + 1; c < gx + g[1]; c += 1) gcells += cell(columnName(c) + r, 8, "");
+        if (g[1] > 1) merges.push(columnName(gx) + r + ":" + columnName(gx + g[1] - 1) + r);
+        gx += g[1];
+      });
+      rows.push('<row r="' + r + '">' + gcells + "</row>");
+      r += 1;
+    }
+    rows.push('<row r="' + r + '" ht="42" customHeight="1">' + ficha.head.map(function (h, c) { return cell(columnName(c) + r, 7, h); }).join("") + "</row>");
+    var headerRow = r;
+    r += 1;
+    var styleFor = function (d) { return d === 3 ? 12 : d === 2 ? 5 : d === 1 ? 13 : 6; };
+    ficha.rows.forEach(function (row) {
+      rows.push('<row r="' + r + '">' + row.map(function (v, c) {
+        var d = ficha.decimals[c];
+        if (typeof v === "number") return cell(columnName(c) + r, styleFor(d), v);
+        return cell(columnName(c) + r, d === null && /^\d{2}\/\d{2}\/\d{4}$/.test(String(v)) ? 11 : 4, v === "-" ? "-" : v);
+      }).join("") + "</row>");
+      r += 1;
+    });
+    if (ficha.note) { r += 1; rows.push('<row r="' + r + '">' + cell("A" + r, 0, ficha.note) + "</row>"); merges.push("A" + r + ":" + columnName(n - 1) + r); }
+    var cols = "";
+    for (var c = 0; c < n; c += 1) cols += '<col min="' + (c + 1) + '" max="' + (c + 1) + '" width="' + (c === 0 ? 13 : 14) + '" customWidth="1"/>';
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:' + columnName(n - 1) + r + '"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="' + headerRow + '" topLeftCell="A' + (headerRow + 1) + '" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr baseColWidth="8" defaultRowHeight="15"/><cols>' + cols + "</cols><sheetData>" + rows.join("") + "</sheetData>" +
+      '<mergeCells count="' + merges.length + '">' + merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join("") + "</mergeCells>" +
+      '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup orientation="landscape" paperSize="9" fitToWidth="1" fitToHeight="0"/></worksheet>';
+  }
+
   function downloadPdf(filename, title, html, meta) {
     var outputName = String(filename || "relatorio-aquagest.pdf").replace(/\.pdf$/i, "");
     var bytes = createReportPdf(buildReportModel(title, html), meta);
@@ -39449,6 +39748,8 @@
     downloadCsv: downloadCsv,
     downloadExcel: downloadExcel,
     downloadPdf: downloadPdf,
+    downloadFichaPdf: downloadFichaPdf,
+    createFichaPdf: createFichaPdf,
     printPdf: printPdf,
     documentHtml: documentHtml
   };
@@ -47877,7 +48178,7 @@
 
             '<div>' +
               '<label for="financialTransaction_cycleId">Lote vinculado</label>' +
-              '<input id="financialTransaction_cycleId" type="text" placeholder="Opcional" />' +
+              '<select id="financialTransaction_cycleId"><option value="">Nenhum (despesa geral)</option></select>' +
             '</div>' +
           '</div>' +
 
@@ -48015,6 +48316,36 @@ function getIncomeCategoryOptionsHtml() {
     '<option value="outras_receitas">Outras receitas</option>'
   );
 }
+
+  /*
+    v26.6 — "Lote vinculado" vira lista dos lotes (nome em português), para o custo
+    ir para o lote certo (Custo por kg produzido). Ao escolher, o viveiro é preenchido.
+  */
+  async function fillFinanceLotOptions(selectedId) {
+    var select = getElement("financialTransaction_cycleId");
+    if (!select || select.tagName !== "SELECT") return;
+    var cycles = [];
+    try {
+      cycles = (await window.database.getAll("production_cycles")).filter(function (c) { return c && !c.deleted; });
+      var iso = window.AquaGestIsolation;
+      if (iso && iso.getScope && iso.filterRecords) cycles = iso.filterRecords("production_cycles", cycles, iso.getScope());
+    } catch (e) { cycles = []; }
+    cycles.sort(function (a, b) { return String(b.startDate || "").localeCompare(String(a.startDate || "")); });
+    var label = function (c) { return window.AquaGestLotLabels ? window.AquaGestLotLabels.build(c) : (c.pondName || "Lote"); };
+    var keep = selectedId !== undefined ? selectedId : select.value;
+    select.innerHTML = '<option value="">Nenhum (despesa geral)</option>' + cycles.map(function (c) {
+      return '<option value="' + escapeHtml(c.id) + '" data-pond="' + escapeHtml(c.pondName || "") + '">' + escapeHtml(label(c)) + "</option>";
+    }).join("");
+    select.value = keep && cycles.some(function (c) { return c.id === keep; }) ? keep : "";
+    if (!select.dataset.lotBound) {
+      select.dataset.lotBound = "true";
+      select.addEventListener("change", function () {
+        var option = select.options[select.selectedIndex];
+        var pond = option ? option.getAttribute("data-pond") : "";
+        if (pond) setValue("financialTransaction_pondName", pond);
+      });
+    }
+  }
 
   function getExpenseCategoryOptionsHtml() {
   return (
@@ -48209,6 +48540,7 @@ function getIncomeCategoryOptionsHtml() {
     setValue("financialTransaction_customerName", "");
     setValue("financialTransaction_pondName", "");
     setValue("financialTransaction_cycleId", "");
+    fillFinanceLotOptions("");
     setValue("financialTransaction_notes", "");
 
     setText("financialTransactionSubmitText", "Salvar lançamento");
@@ -48518,6 +48850,8 @@ function getIncomeCategoryOptionsHtml() {
       return;
     }
 
+    fillFinanceLotOptions();
+
     try {
       var period = getPeriodFilter();
 
@@ -48768,7 +49102,7 @@ function getIncomeCategoryOptionsHtml() {
       setValue("financialTransaction_supplierName", transaction.supplierName || "");
       setValue("financialTransaction_customerName", transaction.customerName || "");
       setValue("financialTransaction_pondName", transaction.pondName || "");
-      setValue("financialTransaction_cycleId", transaction.cycleId || transaction.productionCycleId || "");
+      fillFinanceLotOptions(transaction.cycleId || transaction.productionCycleId || "");
       setValue("financialTransaction_notes", transaction.notes || "");
 
       setText("financialTransactionSubmitText", "Salvar alterações");
@@ -50090,13 +50424,26 @@ function getIncomeCategoryOptionsHtml() {
   }
 
   /* v26.2: o app instalado não tem botão de recarregar do navegador; o botão fica junto da mensagem. */
+  /* v26.6: versão do aplicativo em Configurações, para conferir se a versão nova já está rodando. */
+  var APP_VERSION = "26.7";
+  window.AQUAGEST_VERSION = APP_VERSION;
+  function showAppVersion() {
+    var screen = document.getElementById("screen-configuracoes");
+    if (!screen || document.getElementById("appVersionInfo")) return;
+    var info = document.createElement("p");
+    info.id = "appVersionInfo";
+    info.className = "technical-note";
+    info.textContent = "Versão do aplicativo: " + APP_VERSION;
+    screen.appendChild(info);
+  }
+
   function addReloadButton() {
     var element = document.getElementById("backupStatus");
     if (!element || document.getElementById("backupReloadBtn")) return;
     var button = document.createElement("button");
     button.type = "button";
     button.id = "backupReloadBtn";
-    button.className = "aq-btn-strong";
+    button.className = "primary-btn";
     button.textContent = "Recarregar agora";
     button.style.marginLeft = "10px";
     button.addEventListener("click", function () { window.location.reload(); });
@@ -50104,6 +50451,7 @@ function getIncomeCategoryOptionsHtml() {
   }
 
   function ensureScreen() {
+    showAppVersion();
     var screen = document.getElementById("screen-configuracoes");
     if (!screen || document.getElementById("backupExportBtn")) return;
 
@@ -50231,6 +50579,12 @@ function getIncomeCategoryOptionsHtml() {
     bind();
   }
 
+  /* A tela Configurações pode ser redesenhada depois do init: a versão é recolocada ao abrir a tela. */
+  document.addEventListener("click", function (event) {
+    var target = event.target && event.target.closest ? event.target.closest('[data-screen="configuracoes"]') : null;
+    if (target) setTimeout(showAppVersion, 300);
+  }, true);
+
   window.ConfiguracoesUI = { init: init };
 })();
 
@@ -50261,6 +50615,7 @@ function getIncomeCategoryOptionsHtml() {
   /* v26.4: nome do lote em português, como na tela Desempenho: "V01 — Tilápia / Juvenil (povoado em 20/07/2026)". */
   function lotLabel(c) {
     if (c.name || c.code) return String(c.name || c.code);
+    if (c.cooperativeLotNumber) return [c.pondName || "Viveiro", "Lote " + c.cooperativeLotNumber, brDate(c.startDate)].filter(Boolean).join(" · ");
     var base = (c.pondName || "Viveiro") + (c.species ? " — " + c.species + (c.category ? " / " + c.category : "") : "");
     var start = brDate(c.startDate);
     return base + (start ? " (povoado em " + start + ")" : "");
@@ -50340,16 +50695,29 @@ function getIncomeCategoryOptionsHtml() {
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
   }
 
-  /* ---------- 4. CUSTO POR KG ---------- */
+  /* ---------- 4. CUSTO POR KG PRODUZIDO (v26.6) ----------
+     Mesmos números das outras telas, sem contar nada duas vezes:
+     - Ração: custo da ração baixada do Estoque pelo Arraçoamento (valor da tela Financeiro, custo produtivo).
+     - Outras despesas: lançamentos de despesa do Financeiro com "Lote vinculado" = este lote,
+       exceto a categoria Ração (a compra de ração vira estoque; o custo entra quando é consumida).
+     - Biomassa produzida: ganho de biomassa acumulado da última biometria do lote.
+     - Custo/kg produzido = custo total ÷ biomassa produzida. Resultado = receitas do lote − custo total. */
+  function isVoided(tx) { return /void|cancel|estorn|exclu/i.test(String(tx.status || "")) || tx.deleted; }
   function costPerKg(d) {
+    var byCycle = (d.productive && d.productive.byCycle) || {};
     return (d.cycles || []).map(function (c) {
-      var rec = (d.records || []).filter(function (r) { return r.cycleId === c.id; });
-      var cost = 0, income = 0;
-      rec.forEach(function (r) { var t = String(r.type || "").toLowerCase(); if (/exp|desp|saida|out|cost|custo/.test(t)) cost += num(r.amount); else if (/inc|rec|entrada|in$/.test(t)) income += num(r.amount); });
-      var sales = (d.sales || []).filter(function (s) { return s.cycleId === c.id; });
-      var kg = sales.reduce(function (m, s) { return m + num(s.quantityKg || s.weightKg || s.totalWeightKg || s.quantity); }, 0);
-      income = Math.max(income, sales.reduce(function (m, s) { return m + num(s.totalValue); }, 0));
-      return { name: lotLabel(c), cost: cost, kg: kg, income: income, perKg: kg > 0 ? cost / kg : null, margin: income - cost, price: kg > 0 ? income / kg : null };
+      var linked = (d.transactions || []).filter(function (t) { return !isVoided(t) && (t.cycleId === c.id || t.productionCycleId === c.id); });
+      var feedCost = num(byCycle[c.id] && byCycle[c.id].feedCost);
+      var otherCost = linked.filter(function (t) { return String(t.transactionType).toLowerCase() === "expense" && String(t.category || "") !== "racao"; })
+        .reduce(function (m, t) { return m + num(t.amount); }, 0);
+      var income = linked.filter(function (t) { return String(t.transactionType).toLowerCase() === "income"; })
+        .reduce(function (m, t) { return m + num(t.amount); }, 0);
+      var last = (d.biometries || []).filter(function (b) { return b.cycleId === c.id || b.productionCycleId === c.id; })
+        .sort(function (x, y) { return String(x.date).localeCompare(String(y.date)); }).pop();
+      var producedKg = last ? num(last.biomassGainTotalKg) : 0;
+      var cost = feedCost + otherCost;
+      return { name: lotLabel(c), pond: c.pondName || "Lote", lot: c.cooperativeLotNumber ? "Lote " + c.cooperativeLotNumber : brDate(c.startDate), feedCost: feedCost, otherCost: otherCost, cost: cost, producedKg: producedKg,
+        perKg: producedKg > 0 ? cost / producedKg : null, income: income, margin: income - cost };
     });
   }
 
@@ -50365,8 +50733,12 @@ function getIncomeCategoryOptionsHtml() {
     localStorage.setItem("aq_notified", JSON.stringify(seen));
   }
   async function collect() {
-    var r = await Promise.all([all("production_cycles"), all("biometries"), all("water_quality"), all("inventory"), all("financial_records"), all("sales")]);
-    return { cycles: r[0], biometries: r[1], water: r[2], inventory: r[3], records: r[4], sales: r[5] };
+    var r = await Promise.all([all("production_cycles"), all("biometries"), all("water_quality"), all("inventory"), all("financial_transactions")]);
+    var productive = null;
+    try {
+      if (root.FinanceiroService && root.FinanceiroService.getProductiveCostSummary) productive = await root.FinanceiroService.getProductiveCostSummary({ startDate: "1900-01-01", endDate: "2999-12-31" });
+    } catch (e) { productive = null; }
+    return { cycles: r[0], biometries: r[1], water: r[2], inventory: r[3], transactions: r[4], productive: productive };
   }
   function card(id, parent, html) {
     var el = document.getElementById(id);
@@ -50382,8 +50754,27 @@ function getIncomeCategoryOptionsHtml() {
     if (b) b.onclick = async function () { try { var a = await loadWeather(); document.getElementById("aq-wx").innerHTML = "Clima: " + esc(a.text); } catch (e) { document.getElementById("aq-wx").textContent = "Clima indisponível (permita a localização e conecte-se à internet)."; } };
     notify(al);
     if (fin) {
-      var rows = costPerKg(d).map(function (x) { return "<tr><td>" + esc(x.name) + "</td><td>" + brl(x.cost) + "</td><td>" + kg2(x.kg) + " kg</td><td>" + (x.perKg == null ? "—" : brl(x.perKg)) + "</td><td>" + (x.price == null ? "—" : brl(x.price)) + "</td><td>" + brl(x.margin) + "</td></tr>"; }).join("");
-      card("aq-custokg", fin, "<h3>Custo por kg produzido</h3><div style='overflow-x:auto'><table><thead><tr><th>Lote</th><th>Custo</th><th>Vendido</th><th>Custo/kg</th><th>Preço/kg</th><th>Resultado</th></tr></thead><tbody>" + (rows || "<tr><td colspan=6>Sem lotes.</td></tr>") + "</tbody></table></div><p><small>Considera despesas e vendas vinculadas ao lote. Custo/kg aparece após a primeira venda.</small></p>");
+      /* v26.7 (opção B): quadro com o custo médio dos lotes e uma linha por lote com barra ração × outras despesas; toque abre os valores. */
+      var list = costPerKg(d);
+      var totCost = list.reduce(function (m, x) { return m + x.cost; }, 0);
+      var totKg = list.reduce(function (m, x) { return m + x.producedKg; }, 0);
+      var rowsHtml = list.map(function (x) {
+        var feedPct = x.cost > 0 ? Math.round(x.feedCost / x.cost * 100) : 0;
+        var line = function (label, value) { return "<div class='aq-cost-line'><span>" + esc(label) + "</span><b>" + esc(value) + "</b></div>"; };
+        return "<details class='aq-cost-row'><summary>" +
+          "<span class='aq-cost-badge'>" + esc(x.pond) + "<small>" + esc(x.lot) + "</small></span>" +
+          "<span class='aq-cost-mid'><span class='aq-cost-bar'><i style='width:" + feedPct + "%'></i><i class='o' style='width:" + (x.cost > 0 ? 100 - feedPct : 0) + "%'></i></span>" +
+          "<span class='aq-cost-meta'>" + esc(brl(x.cost)) + " · " + esc(kg2(x.producedKg)) + " kg</span></span>" +
+          "<span class='aq-cost-val'><b>" + (x.perKg == null ? "—" : esc(brl(x.perKg))) + "</b><small>por kg</small></span></summary>" +
+          "<div class='aq-cost-detail'>" + line("Ração consumida", brl(x.feedCost)) + line("Outras despesas do lote", brl(x.otherCost)) + line("Custo total", brl(x.cost)) +
+          line("Biomassa produzida", kg2(x.producedKg) + " kg") + (x.income > 0 ? line("Receitas do lote", brl(x.income)) + line("Resultado", brl(x.margin)) : line("Vendas", "Sem venda registrada")) + "</div></details>";
+      }).join("");
+      card("aq-custokg", fin,
+        "<div class='aq-cost-hero'><small>Custo médio por kg produzido · lotes</small><div class='big'>" + (totKg > 0 ? esc(brl(totCost / totKg)) : "—") + "</div>" +
+        "<div class='row'><div>Custo total<b>" + esc(brl(totCost)) + "</b></div><div>Biomassa produzida<b>" + esc(kg2(totKg)) + " kg</b></div></div></div>" +
+        "<h3>Custo por kg de cada lote</h3><p class='technical-note'>Toque no lote para ver os valores.</p>" + (rowsHtml || "<p>Sem lotes.</p>") +
+        "<div class='aq-cost-legend'><span><i></i>Ração consumida</span><span><i class='o'></i>Outras despesas do lote</span></div>" +
+        "<p><small>Ração = custo da ração baixada do Estoque pelo Arraçoamento. Outras despesas e receitas = lançamentos do Financeiro com o lote vinculado (a categoria Ração não entra, para não contar a ração duas vezes). Biomassa produzida = ganho de biomassa acumulado da última biometria.</small></p>");
     }
     if (cfg) {
       var last = localStorage.getItem("aq_last_backup"), late = !last || Date.now() - Number(last) > 7 * DAY;
@@ -50393,7 +50784,7 @@ function getIncomeCategoryOptionsHtml() {
         '<p><button type="button" class="secondary-btn" id="aq-nt">Ativar notificações</button> <span id="aq-msg"></span></p>');
       var msg = function (t) { document.getElementById("aq-msg").textContent = t; };
       document.getElementById("aq-bk").onclick = async function () { var pw = document.getElementById("aq-pw").value; if (pw.length < 8) return msg("Use uma senha de pelo menos 8 caracteres. Sem ela, o backup não abre."); try { msg("Criptografando..."); await shareOrDownload(await encryptBackup(await root.BackupService.exportDatabase(), pw)); localStorage.setItem("aq_last_backup", String(Date.now())); msg("Backup criado."); } catch (e) { msg(e.message); } };
-      document.getElementById("aq-rs").onclick = async function () { var f = document.getElementById("aq-rf").files[0]; if (!f) return msg("Escolha o arquivo."); try { var env = JSON.parse(await f.text()); var data = env.format === "aquagest-backup-criptografado" ? await decryptBackup(env, document.getElementById("aq-rp").value) : env; if (!confirm("Restaurar substitui/mescla os dados atuais. Continuar?")) return; await root.BackupService.importDatabase(data); msg("Restaurado. Recarregue o app."); } catch (e) { msg(e.message); } };
+      document.getElementById("aq-rs").onclick = async function () { var f = document.getElementById("aq-rf").files[0]; if (!f) return msg("Escolha o arquivo."); try { var env = JSON.parse(await f.text()); var data = env.format === "aquagest-backup-criptografado" ? await decryptBackup(env, document.getElementById("aq-rp").value) : env; if (!confirm("Restaurar substitui/mescla os dados atuais. Continuar?")) return; var res = await root.BackupService.importDatabase(data); msg((res && res.imported ? res.imported + " registros restaurados" + (res.linkedToCurrentUser ? " e ligados à sua conta" : "") + ". " : "Restaurado. ") + "Toque em Recarregar agora para ver os dados."); var host = document.getElementById("aq-rs"); if (host && !document.getElementById("aq-reload")) { var rb = document.createElement("button"); rb.type = "button"; rb.id = "aq-reload"; rb.className = "primary-btn"; rb.textContent = "Recarregar agora"; rb.style.marginLeft = "8px"; rb.onclick = function () { root.location.reload(); }; host.parentNode.appendChild(rb); } } catch (e) { msg(e.message); } };
       document.getElementById("aq-nt").onclick = async function () { msg("Notificações: " + (await Notification.requestPermission())); };
     }
   }
@@ -50687,7 +51078,7 @@ function getIncomeCategoryOptionsHtml() {
       title: "CONTROLE DE BIOMETRIA", fields: copacolHeader(ctx, true),
       groups: [["INFORMAÇÕES DE BIOMETRIA - SEMANAL", 8], ["CONSUMO DE RAÇÃO E CONVERSÃO", 4]],
       head: head, rows: rows, decimals: [null, 0, 0, 3, 2, 2, 2, 2, 2, 2, 2, 2],
-      note: "Peso médio em kg, como na ficha (peso em g ÷ 1.000). Ganho de biomassa = biomassa desta biometria − biomassa anterior (a primeira, em relação ao alojamento)."
+      note: "Peso médio em kg, como na ficha (peso em g ÷ 1.000). Ganho de biomassa = biomassa desta biometria - biomassa anterior (a primeira, em relação ao alojamento)."
     };
   }
 
@@ -50788,18 +51179,18 @@ function getIncomeCategoryOptionsHtml() {
     return doc;
   }
 
-  /* PDF: manejo diário com 4 meses lado a lado, como a ficha de papel da Copacol (Dia + Ração/dia, Mortalidade e T °C de cada mês). */
-  function groupDailyForPdf(sections) {
+  /* Manejo diário com 4 meses lado a lado, como a ficha de papel da Copacol (faixa do mês sobre Ração/dia, Mortalidade e T °C). */
+  function groupDaily(sections) {
     var daily = sections.filter(function (s) { return /MANEJO/.test(s.title); });
     if (!daily.length) return sections;
     var others = sections.filter(function (s) { return !/MANEJO/.test(s.title); });
     var groups = [];
     for (var i = 0; i < daily.length; i += 4) groups.push(daily.slice(i, i + 4));
     return others.concat(groups.map(function (group) {
-      var head = ["Dia"], rows = [], decimals = [0];
+      var head = ["Dia"], rows = [], decimals = [0], bands = [["", 1]];
       group.forEach(function (m) {
-        var month = m.fields[3][1];
-        head.push("Ração/dia (kg) " + month, "Mortalidade " + month, "T °C " + month);
+        bands.push(["MÊS " + m.fields[3][1], 3]);
+        head.push("Ração/dia (kg)", "Mortalidade", "T °C");
         decimals.push(2, 0, 1);
       });
       for (var day = 1; day <= 31; day += 1) {
@@ -50807,40 +51198,87 @@ function getIncomeCategoryOptionsHtml() {
         group.forEach(function (m) { var r0 = m.rows[day - 1]; row.push(r0 ? r0[1] : "", r0 ? r0[2] : "", r0 ? r0[3] : ""); });
         rows.push(row);
       }
-      var fields = group[0].fields.slice(0, 3).concat(group.map(function (m) { return ["Total peixes " + m.fields[3][1] + " (início do mês)", m.fields[4][1]]; }));
-      return { title: group[0].title, fields: fields, head: head, rows: rows, decimals: decimals, note: group[0].note };
+      var fields = group[0].fields.slice(0, 3).concat(group.map(function (m) { return ["Total peixes " + m.fields[3][1], m.fields[4][1]]; }));
+      return { title: group[0].title, fields: fields, groups: bands, head: head, rows: rows, decimals: decimals, note: group[0].note };
     }));
+  }
+
+  function formattedRows(s) {
+    return s.rows.map(function (row) {
+      return row.map(function (v, i) { return typeof v === "number" ? fmt(v, s.decimals[i] === null ? 0 : s.decimals[i]) : String(v === null || v === undefined ? "" : v); });
+    });
+  }
+
+  function stamp() {
+    var d = new Date();
+    return "Gerado em " + String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear() + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   }
 
   async function exportFicha(cycleId, model, kind) {
     var X = window.RelatoriosExportService;
     var doc = await build(cycleId, model);
     var ctx = doc.context;
+    var p = ctx.property || {};
+    var code = "";
+    try { code = window.PisciculturaService && window.PisciculturaService.formatPropertyCode ? window.PisciculturaService.formatPropertyCode(p.id) : ""; } catch (e) { code = ""; }
+    var city = [p.city, p.state].filter(Boolean).join("/");
+    var sections = model === "copacol" ? groupDaily(doc.sections) : doc.sections;
     var label = (model === "copacol" ? "Ficha Copacol" : "Ficha Primato") + " " + txt(ctx.cycle.pondName);
     if (kind === "pdf") {
-      var html = X.propertyIdentificationHtml(ctx.property, ctx.user) + (model === "copacol" ? groupDailyForPdf(doc.sections) : doc.sections).map(sectionHtml).join("");
-      X.downloadPdf(X.fileStamp(ctx.property.name, label, "pdf"), doc.title + " — " + txt(ctx.cycle.pondName), html, { farmName: ctx.property.name, landscape: true });
-    } else {
-      var sheets = [{ name: "Piscicultura", rows: [["Cadastro da piscicultura", "Informação"]].concat(X.propertyIdentificationRows(ctx.property, ctx.user)) }];
-      doc.sections.forEach(function (s, i) {
-        var name = model === "copacol" ? (i === 0 ? "Biometria" : i === 1 ? "Água" : "Manejo " + s.fields[3][1].replace("/", "-")) : "Desempenho";
-        sheets.push(sectionSheet(s, name));
+      X.downloadFichaPdf(X.fileStamp(p.name, label, "pdf"), {
+        model: model === "copacol" ? "Copacol" : "Primato", farm: txt(p.name), code: code, city: city, owner: txt(p.ownerName), generatedAt: stamp(),
+        sections: sections.map(function (s) { return { title: s.title, fields: s.fields, groups: s.groups || [], head: s.head, rows: formattedRows(s), note: s.note }; })
       });
-      X.downloadWorkbook(X.fileStamp(ctx.property.name, label, "xlsx"), sheets, doc.title);
+    } else {
+      var identity = [txt(p.name), code, "Responsável: " + (txt(p.ownerName) || "Não informado"), city, stamp()].filter(Boolean).join(" · ");
+      var sheets = [{ name: "Piscicultura", rows: [["Cadastro da piscicultura", "Informação"]].concat(X.propertyIdentificationRows(ctx.property, ctx.user)) }];
+      sections.forEach(function (s, i) {
+        var name = model === "copacol" ? (i === 0 ? "Biometria" : i === 1 ? "Água" : "Manejo " + (i - 1)) : "Desempenho";
+        sheets.push({ name: name, rows: [[""]], ficha: { title: s.title, identity: identity, fields: s.fields, groups: s.groups || [], head: s.head, rows: s.rows, decimals: s.decimals, note: s.note } });
+      });
+      X.downloadWorkbook(X.fileStamp(p.name, label, "xlsx"), sheets, doc.title);
     }
     return doc;
   }
 
-  /* ---------------- Tela (cartão em Relatórios) ---------------- */
+  /* ---------------- Tela: aba "Fichas da cooperativa" (opção B) ---------------- */
+  var state = { model: "copacol", lot: "" };
+  var lotsCache = [];
+
+  function shortLot(c) {
+    return txt(c.cooperativeLotNumber) ? "Lote " + txt(c.cooperativeLotNumber) : "desde " + brDate(c.startDate);
+  }
+
   async function fillLots() {
-    var select = document.getElementById("fichaLot");
-    if (!select) return;
-    var cycles = (await readAll("production_cycles")).sort(function (a, b) { return txt(b.startDate).localeCompare(txt(a.startDate)); });
-    var current = select.value;
-    select.innerHTML = cycles.length
-      ? cycles.map(function (c) { return "<option value=\"" + esc(c.id) + "\">" + esc(lotName(c)) + "</option>"; }).join("")
-      : "<option value=\"\">Nenhum lote cadastrado</option>";
-    if (current && cycles.some(function (c) { return c.id === current; })) select.value = current;
+    var box = document.getElementById("fichaChips");
+    if (!box) return;
+    lotsCache = (await readAll("production_cycles")).sort(function (a, b) { return txt(a.pondName).localeCompare(txt(b.pondName)) || txt(b.startDate).localeCompare(txt(a.startDate)); });
+    if (!lotsCache.some(function (c) { return c.id === state.lot; })) state.lot = lotsCache.length ? lotsCache[0].id : "";
+    box.innerHTML = lotsCache.length
+      ? lotsCache.map(function (c) { return "<button type=\"button\" class=\"ficha-chip" + (c.id === state.lot ? " on" : "") + "\" data-ficha-lot=\"" + esc(c.id) + "\"><b>" + esc(c.pondName || "Viveiro") + "</b><small>" + esc(shortLot(c)) + "</small></button>"; }).join("")
+      : "<p class=\"technical-note\">Nenhum lote cadastrado.</p>";
+    renderPreview();
+  }
+
+  async function renderPreview() {
+    var box = document.getElementById("fichaPreview");
+    if (!box) return;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-ficha-model]"), function (b) { b.classList.toggle("on", b.getAttribute("data-ficha-model") === state.model); });
+    if (!state.lot) { box.innerHTML = ""; return; }
+    try {
+      var doc = await build(state.lot, state.model);
+      var c = doc.context.cycle, first = doc.sections[0];
+      var cols = state.model === "copacol" ? [0, 1, 3, 5, 9, 11] : [1, 3, 4, 5, 8, 9];
+      var names = state.model === "copacol" ? ["Data", "Saldo", "Peso (kg)", "Biomassa", "CA per.", "CA acum."] : ["Data", "Saldo", "Peso (g)", "Biomassa", "CA per.", "CA geral"];
+      var rows = formattedRows(first).slice(-3);
+      var title = (state.model === "copacol" ? "CONTROLE DE BIOMETRIA" : "CONTROLE DE DESEMPENHO") + " · " + txt(c.pondName) + (txt(c.cooperativeLotNumber) ? " · LOTE " + txt(c.cooperativeLotNumber) : "");
+      var foot = state.model === "copacol"
+        ? "<span>+ Água (" + doc.context.water.length + " leituras) · Manejo (" + Object.keys(doc.context.feeding.reduce(function (m, f) { m[txt(f.date).slice(0, 10)] = 1; return m; }, {})).length + " dias)</span><span>" + doc.context.biometries.length + " biometrias</span>"
+        : "<span>Visita 1 = alojamento</span><span>" + (doc.context.biometries.length + 1) + " visitas</span>";
+      box.innerHTML = "<div class=\"ficha-ph\">PRÉVIA · " + esc(title) + "</div><table><tr>" + names.map(function (n) { return "<th>" + esc(n) + "</th>"; }).join("") + "</tr>" +
+        (rows.length ? rows.map(function (r) { return "<tr>" + cols.map(function (i) { var v = r[i]; if (i === cols[0] && /^\d{2}\/\d{2}\/\d{4}$/.test(v)) v = v.slice(0, 5); return "<td>" + esc(v) + "</td>"; }).join("") + "</tr>"; }).join("") : "<tr><td colspan=\"6\">Sem biometrias ainda.</td></tr>") +
+        "</table><div class=\"ficha-pfoot\">" + foot + "</div>";
+    } catch (e) { box.innerHTML = "<p class=\"technical-note\">" + esc(e.message || "Não foi possível montar a prévia.") + "</p>"; }
   }
 
   function status(text, type) {
@@ -50848,7 +51286,7 @@ function getIncomeCategoryOptionsHtml() {
     if (el) { el.textContent = text; el.className = "backup-status " + (type || ""); }
   }
 
-  /* Aba "Fichas da cooperativa" dentro de Relatórios (mesmo padrão das abas de Produção). */
+  /* Abas de Relatórios: "Relatórios" e "Fichas da cooperativa" (mesmo padrão das abas de Produção). */
   var TAB_KEY = "aquagest_relatorios_tab";
   function selectTab(tab) {
     var screen = document.getElementById("screen-relatorios");
@@ -50886,26 +51324,29 @@ function getIncomeCategoryOptionsHtml() {
       card.className = "page-card";
       card.innerHTML =
         "<h3>Fichas da cooperativa</h3>" +
-        "<p>Ficha do lote no mesmo formato do papel da cooperativa, com a identificação da piscicultura e do responsável.</p>" +
-        "<div class=\"form-grid\">" +
-          "<div><label for=\"fichaModel\">Ficha</label><select id=\"fichaModel\">" +
-            "<option value=\"copacol\">Ficha técnica Copacol — Biometria, Água e Manejo diário</option>" +
-            "<option value=\"primato\">Ficha Primato — Controle de desempenho por viveiro</option>" +
-          "</select></div>" +
-          "<div><label for=\"fichaLot\">Lote</label><select id=\"fichaLot\"></select></div>" +
-        "</div>" +
-        "<p style=\"display:flex;gap:8px;flex-wrap:wrap\">" +
-          "<button type=\"button\" class=\"aq-btn-strong\" id=\"fichaPdfBtn\">Baixar PDF</button>" +
-          "<button type=\"button\" class=\"secondary-btn\" id=\"fichaExcelBtn\">Baixar Excel</button>" +
-        "</p><p id=\"fichaStatus\" class=\"backup-status\"></p>";
+        "<p class=\"technical-note\">Escolha a ficha e o viveiro; confira a prévia e baixe.</p>" +
+        "<div class=\"ficha-seg\" role=\"tablist\"><button type=\"button\" data-ficha-model=\"copacol\" class=\"on\">Copacol</button><button type=\"button\" data-ficha-model=\"primato\">Primato</button></div>" +
+        "<div class=\"ficha-chips\" id=\"fichaChips\"></div>" +
+        "<div class=\"ficha-preview\" id=\"fichaPreview\"></div>" +
+        "<div class=\"ficha-dl\"><button type=\"button\" class=\"primary-btn\" id=\"fichaPdfBtn\">Baixar PDF</button><button type=\"button\" class=\"secondary-btn\" id=\"fichaExcelBtn\">Excel</button></div>" +
+        "<p id=\"fichaStatus\" class=\"backup-status\"></p>";
       screen.appendChild(card);
+      card.addEventListener("click", function (event) {
+        var m = event.target.closest && event.target.closest("[data-ficha-model]");
+        if (m) { state.model = m.getAttribute("data-ficha-model"); renderPreview(); return; }
+        var l = event.target.closest && event.target.closest("[data-ficha-lot]");
+        if (l) {
+          state.lot = l.getAttribute("data-ficha-lot");
+          Array.prototype.forEach.call(card.querySelectorAll("[data-ficha-lot]"), function (b) { b.classList.toggle("on", b === l); });
+          renderPreview();
+        }
+      });
       var run = function (kind) {
         return async function () {
-          var lot = document.getElementById("fichaLot").value;
-          if (!lot) return status("Escolha um lote.", "error");
+          if (!state.lot) return status("Escolha um viveiro.", "error");
           try {
             status("Gerando…", "pending");
-            await exportFicha(lot, document.getElementById("fichaModel").value, kind);
+            await exportFicha(state.lot, state.model, kind);
             status((kind === "pdf" ? "PDF" : "Excel") + " da ficha baixado.", "success");
           } catch (e) { status(e.message || "Não foi possível gerar a ficha.", "error"); }
         };
@@ -50927,7 +51368,7 @@ function getIncomeCategoryOptionsHtml() {
     else setTimeout(mount, 800);
   }
 
-  window.FichasCooperativa = { build: build, exportFicha: exportFicha, primato: primato, copacol: copacol, sectionSheet: sectionSheet };
+  window.FichasCooperativa = { build: build, exportFicha: exportFicha, primato: primato, copacol: copacol, sectionSheet: sectionSheet, groupDaily: groupDaily, selectModel: function (m) { state.model = m; renderPreview(); }, selectLot: function (id) { state.lot = id; fillLots(); } };
 })();
 
 ;
@@ -52940,7 +53381,27 @@ function getIncomeCategoryOptionsHtml() {
     ============================================================
   */
 
+  /*
+    v26.6 — atualização automática: quando uma versão nova é publicada, o service worker
+    novo assume (skipWaiting + clients.claim) e a página recarrega uma vez sozinha,
+    em vez de o produtor precisar abrir o app duas vezes.
+  */
+  function watchForAppUpdate() {
+    try {
+      if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) return;
+      var reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (reloaded) return;
+        reloaded = true;
+        window.location.reload();
+      });
+    } catch (error) {
+      /* sem service worker */
+    }
+  }
+
   async function registerServiceWorker() {
+    watchForAppUpdate();
     if (
       !(
         "serviceWorker" in

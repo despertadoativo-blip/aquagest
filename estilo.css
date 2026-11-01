@@ -4404,3 +4404,56 @@ table thead th {
 /* v26.5 — abas de Relatórios: "Relatórios" e "Fichas da cooperativa" (sem repetir módulos). */
 #screen-relatorios[data-active-tab="fichas"] > :not(#relatoriosTabs):not(#fichasCooperativaCard) { display: none !important; }
 #screen-relatorios:not([data-active-tab="fichas"]) > #fichasCooperativaCard { display: none !important; }
+
+/* v26.6 — Custo por kg produzido: um cartão por lote, valores inteiros na mesma linha. */
+.aq-cost-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 8px 0; }
+.aq-cost-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 12px 14px; }
+.aq-cost-card h4 { margin: 0 0 8px; font-size: .98rem; }
+.aq-cost-line { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-top: 1px solid var(--color-border); font-size: .92rem; }
+.aq-cost-line:first-of-type { border-top: 0; }
+.aq-cost-line span { color: var(--color-muted); }
+.aq-cost-line b { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.aq-cost-line b.aq-cost-strong { color: var(--color-primary); }
+
+/* v26.7 — aba Fichas (opção B): seletor Copacol/Primato, botões por viveiro, prévia e botões de baixar. */
+.ficha-seg { display: flex; background: #e4eeeb; border-radius: 12px; padding: 4px; margin: 12px 0; }
+.ficha-seg button { flex: 1; border: 0; background: transparent; padding: 10px; border-radius: 9px; font: inherit; font-weight: 700; color: var(--color-muted); cursor: pointer; }
+.ficha-seg button.on { background: #fff; color: #0b4f4a; box-shadow: 0 1px 4px rgba(0,0,0,.12); }
+.ficha-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ficha-chip { flex: 1 1 90px; border: 1px solid var(--color-border); background: #fff; border-radius: 14px; padding: 8px 6px; font: inherit; cursor: pointer; text-align: center; }
+.ficha-chip b { display: block; font-size: 1rem; }
+.ficha-chip small { display: block; font-size: .74rem; color: var(--color-muted); }
+.ficha-chip.on { background: #0f766e; border-color: #0f766e; color: #fff; }
+.ficha-chip.on small { color: rgba(255,255,255,.85); }
+.ficha-preview { margin-top: 14px; border: 1px solid #c5ddcc; border-radius: 14px; overflow: hidden; background: #fff; }
+.ficha-preview:empty { display: none; }
+.ficha-ph { background: #e9f4ec; padding: 8px 10px; font-size: .72rem; font-weight: 800; letter-spacing: .04em; color: #1d4d2c; text-align: center; border-bottom: 1px solid #9cc5a8; }
+.ficha-preview table { width: 100%; border-collapse: collapse; font-size: .74rem; }
+.ficha-preview th, .ficha-preview td { border: 1px solid #c5ddcc; padding: 4px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ficha-preview th { background: #f2f8f3; text-align: center; }
+.ficha-preview td:first-child { text-align: center; }
+.ficha-pfoot { display: flex; justify-content: space-between; gap: 8px; font-size: .74rem; color: var(--color-muted); padding: 8px 10px; background: #fafcfb; }
+.ficha-dl { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; margin-top: 14px; }
+.ficha-dl button { width: 100%; min-height: 46px; }
+
+/* v26.7 — Custo por kg (opção B) */
+.aq-cost-hero { background: linear-gradient(135deg, #0f766e, #0b4f4a); color: #fff; border-radius: 18px; padding: 16px; margin: 4px 0 16px; }
+.aq-cost-hero small { opacity: .85; font-size: .8rem; }
+.aq-cost-hero .big { font-size: 2.1rem; font-weight: 800; letter-spacing: -.02em; margin: 4px 0; }
+.aq-cost-hero .row { display: flex; flex-wrap: wrap; gap: 18px; font-size: .8rem; }
+.aq-cost-hero .row b { display: block; font-size: 1rem; white-space: nowrap; }
+.aq-cost-row { border-top: 1px solid var(--color-border); }
+.aq-cost-row summary { list-style: none; display: grid; grid-template-columns: 62px 1fr auto; gap: 10px; align-items: center; padding: 12px 0; cursor: pointer; }
+.aq-cost-row summary::-webkit-details-marker { display: none; }
+.aq-cost-badge { background: var(--color-surface-soft, #eef7f5); border-radius: 12px; text-align: center; padding: 6px 0; font-weight: 800; color: #0b4f4a; }
+.aq-cost-badge small { display: block; font-weight: 500; font-size: .68rem; color: var(--color-muted); }
+.aq-cost-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: #e7efed; }
+.aq-cost-bar i, .aq-cost-legend i { display: block; height: 100%; background: #0f766e; }
+.aq-cost-bar i.o, .aq-cost-legend i.o { background: #9cc9c3; }
+.aq-cost-meta { display: block; font-size: .74rem; color: var(--color-muted); margin-top: 5px; }
+.aq-cost-val { text-align: right; }
+.aq-cost-val b { font-size: 1.12rem; color: #0f766e; white-space: nowrap; }
+.aq-cost-val small { display: block; font-size: .7rem; color: var(--color-muted); }
+.aq-cost-detail { padding: 0 0 12px 72px; }
+.aq-cost-legend { display: flex; gap: 14px; font-size: .74rem; color: var(--color-muted); margin: 10px 0 4px; }
+.aq-cost-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
