@@ -5276,6 +5276,152 @@
 
 ;
 
+/* ===== js/core/lot-state.js ===== */
+/*
+  AquaGest Pro — estado atual do lote (fonte única).
+
+  Todas as telas que mostram "saldo atual", "biomassa atual", "densidade" ou "uso da capacidade"
+  leem daqui, para que o mesmo lote nunca apareça com números diferentes em telas diferentes.
+
+  Regra (a mesma da biometria — população do período = anterior − mortalidade − saídas + entradas):
+    base      = saldo da última biometria (ou nº de peixes alojados, se ainda não houve biometria)
+    saldo     = base − mortes lançadas no Arraçoamento depois da base
+                     − saídas da Movimentação depois da base (mortalidade da Sanidade, despesca, transferência)
+                     + entradas por transferência depois da base
+    peso      = peso médio da última biometria (ou o inicial)
+    biomassa  = saldo × peso ÷ 1000
+    densidade = biomassa ÷ área (kg/m², viveiro escavado) ou ÷ volume (kg/m³, demais estruturas),
+                na mesma unidade da capacidade de suporte do viveiro
+    uso       = biomassa ÷ biomassa máxima recomendada do viveiro × 100
+*/
+(function () {
+  "use strict";
+
+  var root = typeof window !== "undefined" ? window : globalThis;
+
+  function num(value) {
+    if (root.AquaGestNumber && typeof root.AquaGestNumber.parse === "function") return root.AquaGestNumber.parse(value, 0);
+    var n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function text(value) { return String(value === null || value === undefined ? "" : value).trim(); }
+  function day(value) { return text(value).slice(0, 10); }
+  function live(record) {
+    if (!record || record.deleted === true) return false;
+    var status = text(record.status).toLowerCase();
+    return status !== "voided" && status !== "cancelado" && status !== "deleted";
+  }
+  function ofCycle(cycleId) { return function (r) { return r && (r.cycleId === cycleId || r.productionCycleId === cycleId); }; }
+
+  function isAreaBased(pond) {
+    var structure = pond && pond.structureType;
+    if (root.ViveirosService && typeof root.ViveirosService.isAreaBasedStructure === "function") return !!root.ViveirosService.isAreaBasedStructure(structure);
+    return text(structure).toLowerCase().indexOf("escavado") >= 0;
+  }
+
+  /* Densidade e uso da capacidade na unidade da capacidade do viveiro. */
+  function density(pond, biomassKg, population) {
+    var p = pond || {};
+    var perArea = isAreaBased(p);
+    var base = perArea ? num(p.areaM2) : num(p.volumeM3);
+    var unit = perArea ? "m²" : "m³";
+    var maxBiomass = num(p.maxBiomassKg);
+    return {
+      unit: unit,
+      kg: base > 0 ? num(biomassKg) / base : 0,
+      fish: base > 0 ? num(population) / base : 0,
+      usePercent: maxBiomass > 0 ? num(biomassKg) / maxBiomass * 100 : 0,
+      hasBase: base > 0
+    };
+  }
+
+  /* Cálculo puro (sem banco): usado pelas telas e pelos testes. */
+  function compute(input) {
+    var x = input || {};
+    var cycle = x.cycle || {};
+    var cycleId = cycle.id;
+    var biometries = (x.biometries || []).filter(live).filter(ofCycle(cycleId)).sort(function (a, b) { return day(a.date).localeCompare(day(b.date)); });
+    var last = biometries.length ? biometries[biometries.length - 1] : null;
+    var baseDate = last ? day(last.date) : day(cycle.startDate);
+    var basePopulation = last ? num(last.currentPopulation) : num(cycle.quantityInitial);
+
+    var deathsAfter = 0;
+    (x.feeding || []).filter(live).filter(ofCycle(cycleId)).forEach(function (f) {
+      if (day(f.date) > baseDate) deathsAfter += Math.max(0, Math.round(num(f.mortalityCount)));
+    });
+
+    var moves = { totalOut: 0, transferredIn: 0, deaths: 0, harvested: 0 };
+    if (root.FishMovementService && typeof root.FishMovementService.summarize === "function") {
+      moves = root.FishMovementService.summarize(x.movements || [], cycleId, baseDate, "");
+    }
+
+    var population = Math.max(0, Math.round(basePopulation - deathsAfter - num(moves.totalOut) + num(moves.transferredIn)));
+    var averageWeightG = last ? num(last.averageWeightG) : num(cycle.initialAverageWeightG);
+    var biomassKg = population * averageWeightG / 1000;
+    var d = density(x.pond, biomassKg, population);
+    return {
+      cycleId: cycleId,
+      population: population,
+      averageWeightG: averageWeightG,
+      biomassKg: biomassKg,
+      lastBiometryDate: last ? day(last.date) : "",
+      basePopulation: basePopulation,
+      baseDate: baseDate,
+      deathsAfterBase: deathsAfter + num(moves.deaths),
+      movementsOutAfterBase: num(moves.totalOut),
+      density: d
+    };
+  }
+
+  async function readStore(store) {
+    if (!root.database || typeof root.database.getAll !== "function") return [];
+    try {
+      var list = (await root.database.getAll(store)).filter(live);
+      var iso = root.AquaGestIsolation;
+      return iso && iso.getScope && iso.filterRecords ? iso.filterRecords(store, list, iso.getScope()) : list;
+    } catch (error) {
+      return [];
+    }
+  }
+
+  async function loadContext() {
+    var r = await Promise.all([readStore("production_cycles"), readStore("ponds"), readStore("biometries"), readStore("feeding_records"), readStore("mortality_records")]);
+    return { cycles: r[0], ponds: r[1], biometries: r[2], feeding: r[3], movements: r[4] };
+  }
+
+  function stateFor(ctx, cycle) {
+    var pond = ctx.ponds.find(function (p) { return p.id === cycle.pondId; }) || {};
+    var state = compute({ cycle: cycle, pond: pond, biometries: ctx.biometries, feeding: ctx.feeding, movements: ctx.movements });
+    state.cycle = cycle;
+    state.pond = pond;
+    return state;
+  }
+
+  /* Estado atual de um lote. */
+  async function load(cycleId) {
+    var ctx = await loadContext();
+    var cycle = ctx.cycles.find(function (c) { return c.id === cycleId; });
+    return cycle ? stateFor(ctx, cycle) : null;
+  }
+
+  var CLOSED = ["closed", "finished", "finalized", "completed", "cancelled", "encerrado", "finalizado", "concluido", "cancelado", "inactive"];
+  function isActive(cycle) { return CLOSED.indexOf(text(cycle && cycle.status).toLowerCase()) < 0; }
+
+  /* Estado atual de todos os lotes ativos (mapa por id do lote). */
+  async function loadAll() {
+    var ctx = await loadContext();
+    var out = {};
+    ctx.cycles.filter(isActive).forEach(function (cycle) { out[cycle.id] = stateFor(ctx, cycle); });
+    return out;
+  }
+
+  var api = { compute: compute, density: density, load: load, loadAll: loadAll, isActive: isActive };
+  root.AquaGestLotState = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+})();
+
+;
+
 /* ===== js/core/app-state.js ===== */
 // @ts-nocheck
 
@@ -12688,6 +12834,8 @@
 
   var initialized = false;
   var pondsCache = [];
+  var selectedPondId = "";
+  var lotStates = {};
   var currentPropertyCache = null;
 
   var PROPERTY_CHANGED_EVENT = "aquagest:property-changed";
@@ -13181,10 +13329,20 @@
       );
     }
 
-    var population = Number(pond.currentPopulation) || 0;
-    var averageWeightG = Number(pond.currentAverageWeightG) || 0;
-    var biomassKg = Number(pond.currentBiomassKg) || 0;
-    var densityKgM3 = Number(pond.currentDensityKgM3) || 0;
+    /*
+      v26.8: saldo atual = o mesmo da tela Arraçoamento (última biometria menos as mortes lançadas depois dela).
+      Biomassa = saldo × peso médio da última biometria. Densidade na mesma unidade da capacidade
+      (kg/m² em viveiro escavado; kg/m³ nos demais) e o uso da capacidade = biomassa ÷ biomassa máxima.
+    */
+    var state = lotStates[pond.currentCycleId] || null;
+    var population = state ? state.population : (Number(pond.currentPopulation) || 0);
+    var averageWeightG = state ? state.averageWeightG : (Number(pond.currentAverageWeightG) || 0);
+    var biomassKg = state ? state.biomassKg : (Number(pond.currentBiomassKg) || 0);
+    var dens = state ? state.density : (window.AquaGestLotState ? window.AquaGestLotState.density(pond, biomassKg, population) : { kg: 0, unit: "m²", usePercent: 0 });
+    var densityValue = dens.kg;
+    var usePercent = dens.usePercent;
+    var densityText = formatNumber(densityValue, densityValue > 0 && densityValue < 0.1 ? 3 : 2) + " kg/" + dens.unit + (usePercent > 0 ? " · " + formatNumber(usePercent, 1) + "% da capacidade" : "");
+    var lastBiometry = state && state.lastBiometryDate ? state.lastBiometryDate.split("-").reverse().join("/") : "";
     var technicalStatus = pond.currentTechnicalStatus || "Não informado";
 
     return (
@@ -13200,7 +13358,7 @@
 
       '<div class="pond-card-info">' +
         '<strong>Peso médio atual estimado</strong>' +
-        '<span>' + escapeHtml(formatGram(averageWeightG)) + '</span>' +
+        '<span>' + escapeHtml(formatGram(averageWeightG)) + (lastBiometry ? ' <small>(biometria de ' + escapeHtml(lastBiometry) + ')</small>' : '') + '</span>' +
       '</div>' +
 
       '<div class="pond-card-info">' +
@@ -13210,7 +13368,7 @@
 
       '<div class="pond-card-info">' +
         '<strong>Densidade atual estimada</strong>' +
-        '<span>' + escapeHtml(formatDensity(densityKgM3, 4)) + '</span>' +
+        '<span>' + escapeHtml(densityText) + '</span>' +
       '</div>' +
 
       '<div class="pond-card-info">' +
@@ -13241,27 +13399,35 @@
     showElement("pondsTableWrapper");
 
     /*
-      v26.4: no celular cada viveiro ocupa uma tela inteira e o produtor via só o primeiro.
-      Resumo no topo com a quantidade e um botão para ir direto a cada viveiro.
+      v26.8: seletor de viveiro no topo da lista. Mostra um viveiro por vez, com o cartão inteiro,
+      e o seletor fica sempre visível para voltar e escolher outro (ou "Todos").
     */
+    if (!ponds.some(function (p) { return p.id === selectedPondId; }) && selectedPondId !== "all") selectedPondId = ponds[0].id;
     var summary = document.createElement("div");
     summary.id = "pondsSummary";
-    summary.className = "pond-summary";
-    summary.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 12px";
+    summary.className = "pond-selector";
     var count = document.createElement("strong");
-    count.textContent = ponds.length + (ponds.length === 1 ? " viveiro cadastrado:" : " viveiros cadastrados:");
+    count.textContent = ponds.length + (ponds.length === 1 ? " viveiro cadastrado" : " viveiros cadastrados");
     summary.appendChild(count);
-    ponds.forEach(function (pond, index) {
-      var jump = document.createElement("button");
-      jump.type = "button";
-      jump.className = "secondary-btn";
-      jump.textContent = pond.name || "Viveiro " + (index + 1);
-      jump.addEventListener("click", function () {
-        var target = document.getElementById("pondCard_" + index);
-        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    var chips = document.createElement("div");
+    chips.className = "pond-selector-chips";
+    ponds.concat([{ id: "all", name: "Todos" }]).forEach(function (pond) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "pond-chip" + (pond.id === selectedPondId ? " on" : "");
+      chip.setAttribute("data-pond-select", pond.id);
+      chip.textContent = pond.name || "Viveiro";
+      chip.addEventListener("click", function () {
+        selectedPondId = pond.id;
+        Array.prototype.forEach.call(summary.querySelectorAll("[data-pond-select]"), function (b) { b.classList.toggle("on", b.getAttribute("data-pond-select") === selectedPondId); });
+        Array.prototype.forEach.call(document.querySelectorAll("#pondsCardList .pond-card"), function (card) {
+          card.hidden = selectedPondId !== "all" && card.getAttribute("data-pond-id") !== selectedPondId;
+        });
+        summary.scrollIntoView({ behavior: "smooth", block: "start" });
       });
-      summary.appendChild(jump);
+      chips.appendChild(chip);
     });
+    summary.appendChild(chips);
     wrapper.appendChild(summary);
 
     var list = document.createElement("div");
@@ -13279,6 +13445,8 @@
       var card = document.createElement("article");
       card.className = "pond-card";
       card.id = "pondCard_" + pondIndex;
+      card.setAttribute("data-pond-id", pond.id);
+      card.hidden = selectedPondId !== "all" && pond.id !== selectedPondId;
 
       card.innerHTML =
         '<div class="pond-card-header">' +
@@ -13350,6 +13518,9 @@
 
     try {
       pondsCache = await window.ViveirosService.listPonds();
+      /* Estado atual de cada lote pela fonte única (js/core/lot-state.js). */
+      lotStates = {};
+      try { lotStates = window.AquaGestLotState ? await window.AquaGestLotState.loadAll() : {}; } catch (stateError) { lotStates = {}; }
       renderPondsList(pondsCache);
     } catch (error) {
       renderPondsList([]);
@@ -16736,50 +16907,31 @@
           stocking.cycleId ||
           "";
 
-        var quantity =
-          cycle.currentQuantity ||
-          cycle.quantityInitial ||
-          stocking.quantity ||
-          0;
-
-        var averageWeightG =
-          cycle.currentAverageWeightG ||
-          cycle.initialAverageWeightG ||
-          stocking.averageWeightG ||
-          0;
-
-        var biomassKg =
-          cycle.currentBiomassKg ||
-          cycle.initialBiomassKg ||
-          stocking.initialBiomassKg ||
-          0;
-
-        var densityKgM3 =
-          cycle.currentDensityKgM3 ||
-          cycle.initialDensityKgM3 ||
-          stocking.initialDensityKgM3 ||
-          0;
-
-        var densityFishM3 =
-          cycle.currentDensityFishM3 ||
-          cycle.initialDensityFishM3 ||
-          stocking.initialDensityFishM3 ||
-          0;
+        /*
+          v26.8: o cartão de Produção mostra a ENTRADA do lote (alojamento). Antes os campos "inicial"
+          pegavam primeiro os valores atuais (ex.: 8.577 peixes e 838 g no lugar de 9.000 peixes e 40 g).
+          A situação atual do lote fica na tela Viveiros.
+        */
+        var quantity = cycle.quantityInitial || stocking.quantity || 0;
+        var averageWeightG = cycle.initialAverageWeightG || stocking.averageWeightG || 0;
+        var biomassKg = cycle.initialBiomassKg || stocking.initialBiomassKg || (quantity > 0 && averageWeightG > 0 ? quantity * averageWeightG / 1000 : 0);
+        /* Densidade na mesma unidade da capacidade do viveiro: por m² em viveiro escavado, por m³ nos demais. */
+        var areaBasedPond = (window.ViveirosService && typeof window.ViveirosService.isAreaBasedStructure === "function")
+          ? window.ViveirosService.isAreaBasedStructure(pond.structureType)
+          : String(pond.structureType || "").toLowerCase().indexOf("escavado") >= 0;
+        var densityBase = areaBasedPond ? Number(pond.areaM2) : Number(pond.volumeM3);
+        var densityKgM3 = densityBase > 0 ? biomassKg / densityBase : (cycle.initialDensityKgM3 || stocking.initialDensityKgM3 || 0);
+        var densityFishM3 = densityBase > 0 ? quantity / densityBase : (cycle.initialDensityFishM3 || stocking.initialDensityFishM3 || 0);
+        var densityUnit = areaBasedPond && densityBase > 0 ? "m²" : "m³";
 
         var capacityUsePercent =
           cycle.capacityUsePercent ||
           stocking.capacityUsePercent ||
           0;
 
-        var technicalStatus =
-          cycle.technicalStatus ||
-          stocking.technicalStatus ||
-          "Não informado";
-
-        var technicalSeverity =
-          cycle.technicalSeverity ||
-          stocking.technicalSeverity ||
-          "";
+        /* Situação da ENTRADA: a do registro de alojamento (a situação atual fica em Viveiros). */
+        var technicalStatus = stocking.technicalStatus || cycle.technicalStatus || "Não informado";
+        var technicalSeverity = stocking.technicalSeverity || cycle.technicalSeverity || "";
 
         var notes =
           stocking.notes ||
@@ -16879,9 +17031,7 @@
             "<strong>Densidade inicial em biomassa</strong>" +
             "<span>" +
               escapeHtml(
-                formatDensity(
-                  densityKgM3
-                )
+                formatNumber(densityKgM3, densityKgM3 > 0 && densityKgM3 < 0.1 ? 3 : 2) + " kg/" + densityUnit
               ) +
             "</span>" +
           "</div>" +
@@ -16890,9 +17040,7 @@
             "<strong>Densidade inicial em peixes</strong>" +
             "<span>" +
               escapeHtml(
-                formatFishDensity(
-                  densityFishM3
-                )
+                formatNumber(densityFishM3, 2) + " peixes/" + densityUnit
               ) +
             "</span>" +
           "</div>" +
@@ -18508,8 +18656,24 @@
   var TABS = [
     { id: "lotes", label: "Lotes" },
     { id: "mov", label: "Movimentação" },
-    { id: "programa", label: "Programa alimentar" }
+    { id: "programa", label: "Programa alimentar" },
+    { id: "projecao", label: "Projeção de crescimento" }
   ];
+
+  /*
+    v26.9 (sem repetir a projeção em telas separadas): a antiga tela Previsões (TGC) passa a ser
+    a aba "Projeção de crescimento" da Produção, ao lado do Programa alimentar que usa o mesmo TGC.
+  */
+  function mountProjection() {
+    var screen = get("screen-producao");
+    var old = get("screen-previsoes");
+    if (!screen || !old || get("prod_projecao")) return;
+    var holder = document.createElement("section");
+    holder.id = "prod_projecao";
+    holder.setAttribute("data-prod-tab", "projecao");
+    while (old.firstChild) holder.appendChild(old.firstChild);
+    screen.appendChild(holder);
+  }
 
   function buildTabs() {
     var screen = get("screen-producao");
@@ -18865,6 +19029,7 @@
 
   function init() {
     if (!buildTabs()) return;
+    mountProjection();
     buildCard();
     refreshLots();
   }
@@ -21992,8 +22157,9 @@
     var pondName = item.pondName || "Viveiro";
     var species = item.species || "Tilápia";
     var category = item.category || "Categoria não informada";
-    var quantity = Number(item.currentQuantity) > 0
-      ? formatInteger(item.currentQuantity) + " peixes"
+    var saldo = Number(item.currentSaldo) > 0 ? Number(item.currentSaldo) : Number(item.currentQuantity);
+    var quantity = saldo > 0
+      ? formatInteger(saldo) + " peixes"
       : "saldo não informado";
 
     return pondName + " — " + species + " / " + category + " — " + quantity;
@@ -22025,6 +22191,11 @@
       var previousValue = selectedCycleId || select.value || "";
 
       activeLotsCache = await window.BiometriaService.listActiveLotsForBiometry();
+      /* v26.9: saldo atual pela fonte única (js/core/lot-state.js), igual às demais telas. */
+      try {
+        var states = window.AquaGestLotState ? await window.AquaGestLotState.loadAll() : {};
+        activeLotsCache.forEach(function (item) { if (states[item.cycleId]) item.currentSaldo = states[item.cycleId].population; });
+      } catch (stateError) { /* mantém o rótulo sem saldo atualizado */ }
 
       select.innerHTML = '<option value="">Selecione um lote ativo</option>';
 
@@ -22396,7 +22567,13 @@
 
     setValue(
       "biometria_currentDensityKgM3",
-      item.currentDensityKgM3 > 0 ? formatDensity(item.currentDensityKgM3) : "Calculada automaticamente"
+      (function () {
+        /* Mesma unidade da capacidade do viveiro (kg/m² em viveiro escavado). */
+        var lot = getSelectedLot();
+        var d = lot && window.AquaGestLotState ? window.AquaGestLotState.density(biometryPonds[lot.pondId] || {}, item.currentBiomassKg, item.currentPopulation) : null;
+        if (d && d.hasBase && d.kg > 0) return formatNumber(d.kg, d.kg < 0.1 ? 3 : 2) + " kg/" + d.unit;
+        return item.currentDensityKgM3 > 0 ? formatDensity(item.currentDensityKgM3) : "Calculada automaticamente";
+      })()
     );
 
     setValue(
@@ -22523,6 +22700,22 @@
     );
   }
 
+  var biometryPonds = {};
+  function recordDensity(record) {
+    var pond = biometryPonds[record.pondId] || {};
+    return window.AquaGestLotState ? window.AquaGestLotState.density(pond, record.currentBiomassKg, record.currentPopulation) : null;
+  }
+  function recordDensityText(record) {
+    var d = recordDensity(record);
+    if (!d || !d.hasBase) return formatDensity(record.currentDensityKgM3 || 0);
+    return formatNumber(d.kg, d.kg > 0 && d.kg < 0.1 ? 3 : 2) + " kg/" + d.unit;
+  }
+  function recordUseText(record) {
+    var d = recordDensity(record);
+    var value = d && d.usePercent > 0 ? d.usePercent : Number(record.capacityUsePercent) || 0;
+    return formatNumber(value, 1) + "%";
+  }
+
   function renderBiometryHistory(records) {
     var wrapper = getElement("biometriaListWrapper");
 
@@ -22551,10 +22744,23 @@
       return String(b.createdAt || "").localeCompare(String(a.createdAt || ""));
     });
 
+    /*
+      v26.9 (sem repetir o Desempenho): aqui fica só a ÚLTIMA biometria de cada lote, completa.
+      As anteriores aparecem numa lista curta (data e ações de corrigir), sem repetir os indicadores;
+      o histórico completo com os indicadores fica na tela Desempenho.
+    */
+    var seenCycle = {};
+    var latest = [];
+    var older = [];
+    sorted.forEach(function (record) {
+      var key = record.cycleId || record.productionCycleId || "";
+      if (!seenCycle[key]) { seenCycle[key] = true; latest.push(record); } else { older.push(record); }
+    });
+
     var list = document.createElement("div");
     list.className = "pond-card-list";
 
-    sorted.forEach(function (record) {
+    latest.forEach(function (record) {
       var card = document.createElement("article");
       card.className = "pond-card biometry-card";
 
@@ -22581,7 +22787,7 @@
           '</div>' +
 
           '<div class="pond-metric">' +
-            '<strong>Peso médio atual</strong>' +
+            '<strong>Peso médio na biometria</strong>' +
             '<span>' + escapeHtml(formatGram(record.averageWeightG)) + '</span>' +
           '</div>' +
 
@@ -22591,12 +22797,12 @@
           '</div>' +
 
           '<div class="pond-metric">' +
-            '<strong>Saldo atual</strong>' +
+            '<strong>Saldo na biometria</strong>' +
             '<span>' + escapeHtml(formatInteger(record.currentPopulation)) + ' peixes</span>' +
           '</div>' +
 
           '<div class="pond-metric">' +
-            '<strong>Biomassa atual</strong>' +
+            '<strong>Biomassa na biometria</strong>' +
             '<span>' + escapeHtml(formatKg(record.currentBiomassKg)) + '</span>' +
           '</div>' +
 
@@ -22638,13 +22844,14 @@
         buildProjectionHistoryHtml(record) +
 
         '<div class="pond-card-info">' +
-          '<strong>Densidade atual</strong>' +
-          '<span>' + escapeHtml(formatDensity(record.currentDensityKgM3 || 0)) + '</span>' +
+          /* v26.9: valores do dia da biometria, na unidade da capacidade do viveiro (a situação atual fica em Viveiros/Desempenho). */
+          '<strong>Densidade na biometria</strong>' +
+          '<span>' + escapeHtml(recordDensityText(record)) + '</span>' +
         '</div>' +
 
         '<div class="pond-card-info">' +
-          '<strong>Uso da capacidade</strong>' +
-          '<span>' + escapeHtml(formatPercent(record.capacityUsePercent || 0)) + '</span>' +
+          '<strong>Uso da capacidade na biometria</strong>' +
+          '<span>' + escapeHtml(recordUseText(record)) + '</span>' +
         '</div>' +
 
         '<div class="pond-card-info">' +
@@ -22669,6 +22876,28 @@
     });
 
     wrapper.appendChild(list);
+
+    if (older.length) {
+      var box = document.createElement("section");
+      box.className = "biometry-older";
+      box.innerHTML =
+        "<h4>Biometrias anteriores</h4>" +
+        "<p class=\"technical-note\">Para corrigir um registro. Os indicadores de cada biometria ficam no histórico completo, na tela Desempenho.</p>" +
+        older.map(function (record) {
+          return "<div class=\"biometry-older-row\"><span><b>" + escapeHtml(record.pondName || "Viveiro") + "</b> · " + escapeHtml(formatDate(record.date)) + "</span>" +
+            "<span><button class=\"secondary-btn\" type=\"button\" data-biometria-action=\"edit\" data-biometria-id=\"" + escapeHtml(record.id) + "\">Editar</button> " +
+            "<button class=\"secondary-btn\" type=\"button\" data-biometria-action=\"void\" data-biometria-id=\"" + escapeHtml(record.id) + "\">Cancelar</button></span></div>";
+        }).join("");
+      wrapper.appendChild(box);
+    }
+
+    var go = document.createElement("p");
+    go.innerHTML = "<button class=\"secondary-btn\" type=\"button\" data-screen-link=\"desempenho\">Ver histórico completo no Desempenho</button>";
+    go.querySelector("button").addEventListener("click", function () {
+      var nav = document.querySelector('[data-screen="desempenho"]');
+      if (nav) nav.click();
+    });
+    wrapper.appendChild(go);
   }
 
   async function loadBiometryHistory(options) {
@@ -22694,6 +22923,10 @@
       biometryHistoryCache = await window.BiometriaService.getBiometryHistory({
         cycleId: cycleId
       });
+      try {
+        biometryPonds = {};
+        (await window.database.getAll("ponds")).forEach(function (p) { if (p && p.id) biometryPonds[p.id] = p; });
+      } catch (pondError) { biometryPonds = {}; }
 
       renderBiometryHistory(biometryHistoryCache);
     } catch (error) {
@@ -23778,6 +24011,8 @@
     );
   }
 
+  /* v26.9: densidade na unidade da capacidade do viveiro (kg/m² em viveiro escavado; kg/m³ nos demais). */
+  var densityUnit = "m³";
   function formatDensity(value) {
     var number =
       toNumber(value);
@@ -23788,13 +24023,7 @@
       return "-";
     }
 
-    return (
-      formatNumber(
-        number,
-        3
-      ) +
-      " kg/m³"
-    );
+    return formatNumber(number, number < 0.1 ? 3 : 2) + " kg/" + densityUnit;
   }
 
   function formatGpd(value) {
@@ -24705,70 +24934,19 @@
     section.className =
       "page-card";
 
+    /* v26.9 (Painel sem repetir o Desempenho): só os totais da piscicultura; o detalhe de cada lote fica em Desempenho
+       e a situação de cada viveiro em Viveiros. */
     section.innerHTML = `
       <div class="dashboard-performance-header">
         <div>
-          <h3>
-            Desempenho produtivo
-          </h3>
-
-          <p>
-            Resumo técnico do lote ativo mais recente.
-          </p>
+          <h3>Resumo da piscicultura</h3>
+          <p>Totais dos lotes ativos. O detalhe de cada lote fica em Desempenho; a situação de cada viveiro, em Viveiros.</p>
         </div>
-
-        <button
-          id="dashboardOpenPerformanceBtn"
-          class="secondary-btn dashboard-performance-link"
-          type="button"
-        >
-          Ver desempenho completo
-        </button>
+        <button id="dashboardOpenPerformanceBtn" class="secondary-btn dashboard-performance-link" type="button">Ver desempenho por lote</button>
       </div>
-
-      <div
-        id="dashboardPerformanceEmpty"
-        class="performance-empty"
-      >
-        Carregando indicadores produtivos...
-      </div>
-
-      <div
-        id="dashboardPerformanceContent"
-        class="hidden"
-      >
-        <div
-          id="dashboardPerformanceSummary"
-          class="dashboard-performance-grid"
-        ></div>
-
-        <div class="dashboard-performance-chart-grid">
-          <article class="dashboard-performance-chart">
-            <h4>Peso médio</h4>
-
-            <p>
-              Evolução do lote.
-            </p>
-
-            <div
-              id="dashboardPerformanceWeightChart"
-              class="performance-chart"
-            ></div>
-          </article>
-
-          <article class="dashboard-performance-chart">
-            <h4>Biomassa</h4>
-
-            <p>
-              Evolução da biomassa do lote.
-            </p>
-
-            <div
-              id="dashboardPerformanceBiomassChart"
-              class="performance-chart"
-            ></div>
-          </article>
-        </div>
+      <div id="dashboardPerformanceEmpty" class="performance-empty">Carregando…</div>
+      <div id="dashboardPerformanceContent" class="hidden">
+        <div id="dashboardPerformanceSummary" class="dashboard-performance-grid"></div>
       </div>
     `;
 
@@ -26356,10 +26534,13 @@
           100
         : null;
 
-    var mortality =
-      getTotalMortality(
-        series
-      );
+    /* Estado atual pela fonte única; o histórico (series) continua com os valores de cada data. */
+    var state = context.lotState || null;
+    var nowBiomass = state ? state.biomassKg : toNumber(last.currentBiomassKg);
+    var nowPopulation = state ? state.population : toNumber(last.currentPopulation);
+    var nowDensity = state ? state.density.kg : toNumber(last.densityCapacityUnit);
+    var nowUse = state ? state.density.usePercent : toNumber(last.capacityUsePercent);
+    var mortality = getTotalMortality(series) + (state ? toNumber(state.deathsAfterBase) : 0);
 
     var totalFeed =
       getTotalFeed(
@@ -26408,15 +26589,8 @@
       buildSummaryCard(
         "Biomassa atual",
 
-        toNumber(
-          last.currentBiomassKg
-        ) > 0
-          ? formatKg(
-              last.currentBiomassKg
-            )
-          : "-",
-
-        "Estimativa atual",
+        nowBiomass > 0 ? formatKg(nowBiomass) : "-",
+        "Saldo atual × peso da última biometria",
 
         null
       ) +
@@ -26424,14 +26598,7 @@
       buildSummaryCard(
         "População atual",
 
-        toNumber(
-          last.currentPopulation
-        ) > 0
-          ? formatInteger(
-              last.currentPopulation
-            ) +
-            " peixes"
-          : "-",
+        nowPopulation > 0 ? formatInteger(nowPopulation) + " peixes" : "-",
 
         mortality > 0
           ? "Mortalidade: " +
@@ -26484,11 +26651,8 @@
       buildSummaryCard(
         "Densidade",
 
-        formatDensity(
-          last.currentDensityKgM3
-        ),
-
-        "Biomassa por volume",
+        formatDensity(nowDensity),
+        densityUnit === "m²" ? "Biomassa por área" : "Biomassa por volume",
 
         null
       ) +
@@ -26496,21 +26660,9 @@
       buildSummaryCard(
         "Uso da capacidade",
 
-        toNumber(
-          last.capacityUsePercent
-        ) > 0
-          ? formatPercent(
-              last.capacityUsePercent
-            )
-          : "-",
-
+        nowUse > 0 ? formatNumber(nowUse, 1) + "%" : "-",
         "Capacidade do viveiro",
-
-        toNumber(
-          last.capacityUsePercent
-        ) > 0
-          ? last.capacityUsePercent
-          : null
+        nowUse > 0 ? nowUse : null
       );
   }
 
@@ -26771,7 +26923,7 @@
               "<td>" +
               escapeHtml(
                 formatDensity(
-                  item.currentDensityKgM3
+                  item.densityCapacityUnit
                 )
               ) +
               "</td>" +
@@ -26918,7 +27070,7 @@
       series,
 
       function (item) {
-        return item.currentDensityKgM3;
+        return item.densityCapacityUnit;
       },
 
       function (value) {
@@ -27012,6 +27164,21 @@
         biometriesCache
       );
 
+    /* Estado atual pela fonte única (js/core/lot-state.js) — mesmos números de Viveiros e Arraçoamento. */
+    context.lotState = null;
+    if (window.AquaGestLotState) {
+      try { context.lotState = await window.AquaGestLotState.load(selectedCycleId); } catch (stateError) { context.lotState = null; }
+    }
+    var densityPond = (context.lotState && context.lotState.pond) || context.pond || {};
+    densityUnit = window.AquaGestLotState ? window.AquaGestLotState.density(densityPond, 0, 0).unit : "m³";
+    (context.series || []).forEach(function (item) {
+      item.densityCapacityUnit = window.AquaGestLotState
+        ? window.AquaGestLotState.density(densityPond, item.currentBiomassKg, item.currentPopulation).kg
+        : toNumber(item.currentDensityKgM3);
+    });
+    var densityTitle = document.querySelector("#performanceDensityChart") && document.querySelector("#performanceDensityChart").parentNode.querySelector("p");
+    if (densityTitle) densityTitle.textContent = densityUnit === "m²" ? "Biomassa por área do viveiro (kg/m²)." : "Biomassa por volume do viveiro (kg/m³).";
+
     renderLotInfo(
       context
     );
@@ -27047,283 +27214,48 @@
     ============================================================
   */
 
-  function renderDashboardSummaryCards(
-    context
-  ) {
-    var grid =
-      getElement(
-        "dashboardPerformanceSummary"
-      );
-
-    if (!grid) {
-      return;
-    }
-
-    var last =
-      getLastItem(
-        context.series
-      ) ||
-      {};
-
-    var cycle =
-      context.cycle;
-
-    var targetWeight =
-      toNumber(
-        firstValue(
-          cycle,
-          [
-            "targetWeightG"
-          ],
-          0
-        )
-      );
-
-    var currentWeight =
-      toNumber(
-        last.averageWeightG
-      );
-
-    var progress =
-      targetWeight > 0
-        ? (
-            currentWeight /
-            targetWeight
-          ) *
-          100
-        : null;
-
-    grid.innerHTML =
-      buildSummaryCard(
-        "Peso médio",
-
-        currentWeight > 0
-          ? formatGram(
-              currentWeight
-            )
-          : "-",
-
-        targetWeight > 0
-          ? "Meta: " +
-            formatGram(
-              targetWeight
-            )
-          : "Meta não informada",
-
-        progress
-      ) +
-
-      buildSummaryCard(
-        "Biomassa",
-
-        toNumber(
-          last.currentBiomassKg
-        ) > 0
-          ? formatKg(
-              last.currentBiomassKg
-            )
-          : "-",
-
-        "Biomassa atual",
-
-        null
-      ) +
-
-      buildSummaryCard(
-        "GPD",
-
-        formatGpd(
-          last.gpdGDay
-        ),
-
-        "Ganho de peso diário",
-
-        null
-      ) +
-
-      buildSummaryCard(
-        "CAA",
-
-        formatFcr(
-          last.fcrPeriod
-        ),
-
-        "Conversão alimentar",
-
-        null
-      ) +
-
-      buildSummaryCard(
-        "População",
-
-        toNumber(
-          last.currentPopulation
-        ) > 0
-          ? formatInteger(
-              last.currentPopulation
-            ) +
-            " peixes"
-          : "-",
-
-        "Saldo estimado",
-
-        null
-      ) +
-
-      buildSummaryCard(
-        "Densidade",
-
-        formatDensity(
-          last.currentDensityKgM3
-        ),
-
-        "Biomassa por volume",
-
-        null
-      ) +
-
-      buildSummaryCard(
-        "Uso da capacidade",
-
-        toNumber(
-          last.capacityUsePercent
-        ) > 0
-          ? formatPercent(
-              last.capacityUsePercent
-            )
-          : "-",
-
-        "Capacidade técnica",
-
-        toNumber(
-          last.capacityUsePercent
-        ) > 0
-          ? last.capacityUsePercent
-          : null
-      );
-  }
-
   async function renderDashboardSummary() {
     ensureDashboardSection();
+    var empty = getElement("dashboardPerformanceEmpty");
+    var content = getElement("dashboardPerformanceContent");
+    var grid = getElement("dashboardPerformanceSummary");
+    if (!empty || !content || !grid) return;
 
-    var empty =
-      getElement(
-        "dashboardPerformanceEmpty"
-      );
-
-    var content =
-      getElement(
-        "dashboardPerformanceContent"
-      );
-
-    if (
-      !empty ||
-      !content
-    ) {
+    var states = {};
+    try { states = window.AquaGestLotState ? await window.AquaGestLotState.loadAll() : {}; } catch (error) { states = {}; }
+    var list = Object.keys(states).map(function (k) { return states[k]; });
+    if (!list.length) {
+      empty.innerHTML = "Nenhum lote ativo. Cadastre a entrada de um lote em Produção.";
+      empty.classList.remove("hidden");
+      content.classList.add("hidden");
       return;
     }
 
-    await loadLots();
+    /* Totais (somas simples dos estados atuais de cada lote, pela fonte única js/core/lot-state.js). */
+    var fish = list.reduce(function (m, x) { return m + x.population; }, 0);
+    var biomass = list.reduce(function (m, x) { return m + x.biomassKg; }, 0);
+    var ponds = {};
+    list.forEach(function (x) { if (x.cycle && x.cycle.pondId) ponds[x.cycle.pondId] = true; });
+    var since = new Date(); since.setDate(since.getDate() - 6);
+    var sinceIso = since.getFullYear() + "-" + String(since.getMonth() + 1).padStart(2, "0") + "-" + String(since.getDate()).padStart(2, "0");
+    var feed7 = 0;
+    try {
+      var ids = {}; list.forEach(function (x) { ids[x.cycleId] = true; });
+      (await dbGetAll("feeding_records")).forEach(function (f) {
+        if (!f || f.deleted === true) return;
+        var c = f.cycleId || f.productionCycleId;
+        if (ids[c] && String(f.date || "").slice(0, 10) >= sinceIso) feed7 += toNumber(f.feedProvidedKg);
+      });
+    } catch (error) { feed7 = 0; }
 
-    var lot =
-      getDashboardLot();
-
-    if (!lot) {
-      empty.innerHTML =
-        "Nenhum lote ativo disponível para exibir desempenho.";
-
-      empty.classList.remove(
-        "hidden"
-      );
-
-      content.classList.add(
-        "hidden"
-      );
-
-      return;
-    }
-
-    var cycleId =
-      getLotCycleId(
-        lot
-      );
-
-    await loadBiometries(
-      cycleId
-    );
-
-    var context =
-      buildPerformanceSeries(
-        lot,
-        biometriesCache
-      );
-
-    renderDashboardSummaryCards(
-      context
-    );
-
-    renderLineChart(
-      "dashboardPerformanceWeightChart",
-      context.series,
-
-      function (item) {
-        return item.averageWeightG;
-      },
-
-      function (value) {
-        return formatNumber(
-          value,
-          0
-        );
-      },
-
-      {
-        color:
-          COLORS.primary,
-
-        emptyText:
-          "Ainda não existem dados suficientes de peso."
-      }
-    );
-
-    renderLineChart(
-      "dashboardPerformanceBiomassChart",
-      context.series,
-
-      function (item) {
-        return item.currentBiomassKg;
-      },
-
-      function (value) {
-        return formatNumber(
-          value,
-          1
-        );
-      },
-
-      {
-        color:
-          COLORS.secondary,
-
-        emptyText:
-          "Ainda não existem dados suficientes de biomassa."
-      }
-    );
-
-    empty.classList.add(
-      "hidden"
-    );
-
-    content.classList.remove(
-      "hidden"
-    );
+    grid.innerHTML =
+      buildSummaryCard("Lotes ativos", formatInteger(list.length), Object.keys(ponds).length + " viveiro(s) em uso", null) +
+      buildSummaryCard("Peixes nos lotes", formatInteger(fish) + " peixes", "Saldo atual somado", null) +
+      buildSummaryCard("Biomassa total", formatKg(biomass), "Soma dos lotes ativos", null) +
+      buildSummaryCard("Ração nos últimos 7 dias", formatKg(feed7), "Lançada no Arraçoamento", null);
+    empty.classList.add("hidden");
+    content.classList.remove("hidden");
   }
-
-  /*
-    ============================================================
-    REFRESH
-    ============================================================
-  */
 
   async function refresh() {
     if (
@@ -33987,7 +33919,20 @@
       }
     });
 
-    var currentPopulation = Math.max(0, basePopulation - mortalityAfterBase);
+    /*
+      v26.9 — mesma regra do estado atual do lote (js/core/lot-state.js): além das mortes do arraçoamento,
+      descontam-se as saídas da Movimentação depois da base (mortalidade da Sanidade, despesca, transferência)
+      e somam-se as entradas por transferência.
+    */
+    var movementsAfterBase = { totalOut: 0, transferredIn: 0 };
+    if (cycleId && window.FishMovementService && typeof window.FishMovementService.summarize === "function") {
+      try {
+        movementsAfterBase = window.FishMovementService.summarize(await dbGetAll("mortality_records"), cycleId, String(baseDate || "").slice(0, 10), "");
+      } catch (movementError) {
+        movementsAfterBase = { totalOut: 0, transferredIn: 0 };
+      }
+    }
+    var currentPopulation = Math.max(0, basePopulation - mortalityAfterBase - toNumber(movementsAfterBase.totalOut) + toNumber(movementsAfterBase.transferredIn));
     var currentBiomassKg = averageWeightG > 0
       ? currentPopulation * averageWeightG / 1000
       : firstNumberFromObjects([cycle || {}, pond || {}], ["currentBiomassKg"], 0);
@@ -48010,11 +47955,11 @@
         '</div>' +
         '<div class="stock-summary-card">' +
           '<strong id="financeSummaryFeedCost">R$ 0,00</strong>' +
-          '<span>Custo produtivo com ração</span>' +
+          '<span>Custo da ração consumida (período selecionado)</span>' +
         '</div>' +
         '<div class="stock-summary-card">' +
           '<strong id="financeSummaryFeedKg">0,000 kg</strong>' +
-          '<span>Ração consumida no período</span>' +
+          '<span>Ração consumida (período selecionado)</span>' +
         '</div>' +
       '</section>' +
 
@@ -48240,7 +48185,7 @@
             '<span>Consumo de ração baixado do Estoque e convertido em custo técnico da produção.</span>' +
           '</div>' +
         '</div>' +
-        '<div id="productiveCostEmptyState" class="empty-state">Nenhum custo produtivo de ração no período.</div>' +
+        '<div id="productiveCostEmptyState" class="empty-state">Nenhum custo de ração consumida no período selecionado.</div>' +
         '<div id="productiveCostWrapper" class="hidden"></div>' +
       '</section>';
 
@@ -50425,7 +50370,7 @@ function getIncomeCategoryOptionsHtml() {
 
   /* v26.2: o app instalado não tem botão de recarregar do navegador; o botão fica junto da mensagem. */
   /* v26.6: versão do aplicativo em Configurações, para conferir se a versão nova já está rodando. */
-  var APP_VERSION = "26.7";
+  var APP_VERSION = "26.9";
   window.AQUAGEST_VERSION = APP_VERSION;
   function showAppVersion() {
     var screen = document.getElementById("screen-configuracoes");
@@ -50452,6 +50397,7 @@ function getIncomeCategoryOptionsHtml() {
 
   function ensureScreen() {
     showAppVersion();
+    setTimeout(showLastBackup, 0);
     var screen = document.getElementById("screen-configuracoes");
     if (!screen || document.getElementById("backupExportBtn")) return;
 
@@ -50459,11 +50405,15 @@ function getIncomeCategoryOptionsHtml() {
       '<section class="page-card settings-hero-card">' +
         '<div class="section-kicker">Proteção local</div>' +
         '<h3>Backup e restauração</h3>' +
-        '<p>Exporte os dados da piscicultura atual para um arquivo JSON. Guarde-o fora do aparelho para recuperar a produção em caso de limpeza do navegador ou troca de dispositivo.</p>' +
+        '<p>Exporte os dados da piscicultura atual para um arquivo. Guarde-o fora do aparelho para recuperar a produção em caso de limpeza do navegador ou troca de dispositivo.</p>' +
+        /* v26.9: um único backup. A senha é opcional: com senha, o arquivo sai protegido (criptografado); para importar um arquivo protegido, digite a mesma senha. */
+        '<p id="backupLastInfo" class="technical-note"></p>' +
+        '<div class="form-grid"><div><label for="backupPassword">Senha para proteger o arquivo (opcional, mínimo 8 caracteres)</label>' +
+          '<input type="password" id="backupPassword" autocomplete="new-password" placeholder="Opcional — em branco, o backup sai sem senha" /></div></div>' +
         '<div class="settings-actions">' +
           '<button type="button" class="secondary-btn aq-btn-strong" id="backupExportBtn">Exportar backup</button>' +
           '<button type="button" class="secondary-btn" id="backupImportBtn">Importar backup</button>' +
-          '<input type="file" id="backupFileInput" accept="application/json,.json" hidden />' +
+          '<input type="file" id="backupFileInput" accept="application/json,.json,.aqbak" hidden />' +
         '</div>' +
         '<p id="backupStatus" class="backup-status" role="status"></p>' +
       '</section>' +
@@ -50482,12 +50432,21 @@ function getIncomeCategoryOptionsHtml() {
       '</section>';
   }
 
-  function downloadBackup(backup) {
-    var blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  function showLastBackup() {
+    var el = document.getElementById("backupLastInfo");
+    if (!el) return;
+    var last = null;
+    try { last = localStorage.getItem("aq_last_backup"); } catch (e) { last = null; }
+    var late = !last || Date.now() - Number(last) > 7 * 86400000;
+    el.textContent = late ? "Faz mais de 7 dias sem backup (ou nenhum backup feito neste aparelho)." : "Último backup: " + new Date(Number(last)).toLocaleDateString("pt-BR") + ".";
+  }
+
+  function downloadBackup(backup, encrypted) {
+    var blob = new Blob([JSON.stringify(backup, null, encrypted ? 0 : 2)], { type: "application/json" });
     var url = URL.createObjectURL(blob);
     var link = document.createElement("a");
     link.href = url;
-    link.download = "aquagest-backup-" + (function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })() + ".json";
+    link.download = "aquagest-backup-" + (function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); })() + (encrypted ? ".aqbak" : ".json");
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -50518,10 +50477,19 @@ function getIncomeCategoryOptionsHtml() {
 
     exportButton.addEventListener("click", async function () {
       try {
+        var password = (document.getElementById("backupPassword") || {}).value || "";
+        if (password && password.length < 8) { setStatus("A senha precisa ter pelo menos 8 caracteres (ou deixe em branco).", "error"); return; }
         setStatus("Preparando o backup…", "pending");
-        downloadBackup(await window.BackupService.exportDatabase());
+        var data = await window.BackupService.exportDatabase();
+        if (password) {
+          if (!window.AquaGestMelhorias || typeof window.AquaGestMelhorias.encryptBackup !== "function") throw new Error("Proteção por senha indisponível neste aparelho.");
+          downloadBackup(await window.AquaGestMelhorias.encryptBackup(data, password), true);
+        } else {
+          downloadBackup(data, false);
+        }
         try { localStorage.setItem("aq_last_backup", String(Date.now())); } catch (e) { /* sem storage */ }
-        setStatus("Backup exportado com todas as tabelas.", "success");
+        showLastBackup();
+        setStatus(password ? "Backup protegido por senha exportado. Guarde a senha: sem ela o arquivo não abre." : "Backup exportado com todas as tabelas.", "success");
       } catch (error) {
         setStatus(error.message || "Não foi possível exportar o backup.", "error");
       }
@@ -50535,6 +50503,11 @@ function getIncomeCategoryOptionsHtml() {
 
       try {
         var backup = JSON.parse(await file.text());
+        if (backup && backup.format === "aquagest-backup-criptografado") {
+          var pass = (document.getElementById("backupPassword") || {}).value || "";
+          if (!pass) { setStatus("Este arquivo é protegido por senha. Digite a senha no campo acima e importe de novo.", "error"); return; }
+          backup = await window.AquaGestMelhorias.decryptBackup(backup, pass);
+        }
         window.BackupService.validateBackup(backup);
         if (!window.confirm("Importar este backup irá mesclar os registros no aparelho. Continuar?")) return;
         var result = await window.BackupService.importDatabase(backup);
@@ -50769,23 +50742,21 @@ function getIncomeCategoryOptionsHtml() {
           "<div class='aq-cost-detail'>" + line("Ração consumida", brl(x.feedCost)) + line("Outras despesas do lote", brl(x.otherCost)) + line("Custo total", brl(x.cost)) +
           line("Biomassa produzida", kg2(x.producedKg) + " kg") + (x.income > 0 ? line("Receitas do lote", brl(x.income)) + line("Resultado", brl(x.margin)) : line("Vendas", "Sem venda registrada")) + "</div></details>";
       }).join("");
-      card("aq-custokg", fin,
+      /* v26.9: o custo por kg fica só na aba "Custos produtivos" do Financeiro. */
+      var costsPanel = fin.querySelector('[data-finance-panel="costs"]') || fin;
+      card("aq-custokg", costsPanel,
         "<div class='aq-cost-hero'><small>Custo médio por kg produzido · lotes</small><div class='big'>" + (totKg > 0 ? esc(brl(totCost / totKg)) : "—") + "</div>" +
         "<div class='row'><div>Custo total<b>" + esc(brl(totCost)) + "</b></div><div>Biomassa produzida<b>" + esc(kg2(totKg)) + " kg</b></div></div></div>" +
         "<h3>Custo por kg de cada lote</h3><p class='technical-note'>Toque no lote para ver os valores.</p>" + (rowsHtml || "<p>Sem lotes.</p>") +
         "<div class='aq-cost-legend'><span><i></i>Ração consumida</span><span><i class='o'></i>Outras despesas do lote</span></div>" +
         "<p><small>Ração = custo da ração baixada do Estoque pelo Arraçoamento. Outras despesas e receitas = lançamentos do Financeiro com o lote vinculado (a categoria Ração não entra, para não contar a ração duas vezes). Biomassa produzida = ganho de biomassa acumulado da última biometria.</small></p>");
     }
+    /* v26.9: o backup (com ou sem senha) fica num cartão só, em Configurações (configuracoes-ui.js).
+       Aqui resta apenas a ativação das notificações dos alertas do Painel. */
     if (cfg) {
-      var last = localStorage.getItem("aq_last_backup"), late = !last || Date.now() - Number(last) > 7 * DAY;
-      card("aq-backup", cfg, "<h3>Backup protegido e alertas</h3>" + (late ? "<p>🟡 Faz mais de 7 dias sem backup.</p>" : "<p>Último backup: " + new Date(Number(last)).toLocaleDateString("pt-BR") + ".</p>") +
-        '<p><input type="password" id="aq-pw" placeholder="Senha do backup (mín. 8)" autocomplete="new-password"> <button type="button" class="secondary-btn" id="aq-bk">Criar backup criptografado</button></p>' +
-        '<p><input type="file" id="aq-rf" accept=".aqbak,application/json"> <input type="password" id="aq-rp" placeholder="Senha" autocomplete="off"> <button type="button" class="secondary-btn" id="aq-rs">Restaurar</button></p>' +
+      card("aq-backup", cfg, "<h3>Notificações dos alertas</h3><p>Receba no aparelho os alertas do dia (biometria atrasada, oxigênio baixo, estoque e validade).</p>" +
         '<p><button type="button" class="secondary-btn" id="aq-nt">Ativar notificações</button> <span id="aq-msg"></span></p>');
-      var msg = function (t) { document.getElementById("aq-msg").textContent = t; };
-      document.getElementById("aq-bk").onclick = async function () { var pw = document.getElementById("aq-pw").value; if (pw.length < 8) return msg("Use uma senha de pelo menos 8 caracteres. Sem ela, o backup não abre."); try { msg("Criptografando..."); await shareOrDownload(await encryptBackup(await root.BackupService.exportDatabase(), pw)); localStorage.setItem("aq_last_backup", String(Date.now())); msg("Backup criado."); } catch (e) { msg(e.message); } };
-      document.getElementById("aq-rs").onclick = async function () { var f = document.getElementById("aq-rf").files[0]; if (!f) return msg("Escolha o arquivo."); try { var env = JSON.parse(await f.text()); var data = env.format === "aquagest-backup-criptografado" ? await decryptBackup(env, document.getElementById("aq-rp").value) : env; if (!confirm("Restaurar substitui/mescla os dados atuais. Continuar?")) return; var res = await root.BackupService.importDatabase(data); msg((res && res.imported ? res.imported + " registros restaurados" + (res.linkedToCurrentUser ? " e ligados à sua conta" : "") + ". " : "Restaurado. ") + "Toque em Recarregar agora para ver os dados."); var host = document.getElementById("aq-rs"); if (host && !document.getElementById("aq-reload")) { var rb = document.createElement("button"); rb.type = "button"; rb.id = "aq-reload"; rb.className = "primary-btn"; rb.textContent = "Recarregar agora"; rb.style.marginLeft = "8px"; rb.onclick = function () { root.location.reload(); }; host.parentNode.appendChild(rb); } } catch (e) { msg(e.message); } };
-      document.getElementById("aq-nt").onclick = async function () { msg("Notificações: " + (await Notification.requestPermission())); };
+      document.getElementById("aq-nt").onclick = async function () { document.getElementById("aq-msg").textContent = "Notificações: " + (await Notification.requestPermission()); };
     }
   }
 
@@ -50823,8 +50794,9 @@ function getIncomeCategoryOptionsHtml() {
   var STORES = [
     ["properties", "Propriedades"], ["ponds", "Viveiros"], ["production_cycles", "Lotes"],
     ["biometries", "Biometrias"], ["water_quality", "Qualidade da água"], ["feeding_records", "Arraçoamento"],
-    ["mortality_records", "Mortalidade"], ["health_records", "Sanidade"], ["inventory", "Estoque"],
-    ["sales", "Vendas"], ["financial_records", "Financeiro"]
+    /* v26.9: contagem nas tabelas que o app usa de fato (antes contava tabelas antigas e vazias). */
+    ["mortality_records", "Movimentação de peixes"], ["health_records", "Sanidade"], ["inventory", "Estoque"],
+    ["inventory_movements", "Movimentos de estoque"], ["financial_transactions", "Lançamentos financeiros"]
   ];
 
   /* Classifica o endereço onde o app está rodando. Só "producao" tem armazenamento durável. */
